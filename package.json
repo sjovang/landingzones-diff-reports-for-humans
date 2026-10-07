@@ -1,0 +1,47 @@
+{
+	"name": "sjovang-literate-sniffle",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev",
+		"build": "vite build",
+		"preview": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js preview",
+		"start": "node --env-file-if-exists=.env build/index.js",
+		"build:functions": "tsc -p tsconfig.functions.json",
+		"functions:start": "npm run build:functions && func start",
+		"releases:sync": "npm run build:functions && node --env-file-if-exists=.env dist-functions/scripts/sync-releases.js",
+		"storage:start": "azurite --silent --location .azurite --skipApiVersionCheck",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test:unit": "vitest run",
+		"test": "npm run test:unit && npm run test:e2e",
+		"test:e2e": "playwright test"
+	},
+	"main": "dist-functions/functions/*.js",
+	"devDependencies": {
+		"@playwright/test": "^1.60.0",
+		"@sveltejs/adapter-node": "^6.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"@types/node": "^24",
+		"azurite": "^3.37.0",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0",
+		"vitest": "^4.1.8"
+	},
+	"imports": {
+		"#lib": "./src/lib/index.js",
+		"#lib/*": "./src/lib/*"
+	},
+	"dependencies": {
+		"@azure/data-tables": "^13.3.2",
+		"@azure/functions": "^4.16.5",
+		"@azure/identity": "^4.13.3",
+		"@azure/storage-blob": "^12.34.0",
+		"@azure/storage-queue": "^12.32.0"
+	}
+}
