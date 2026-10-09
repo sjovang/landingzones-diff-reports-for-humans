@@ -339,7 +339,7 @@
 			<div>
 				<h1 id="page-title" tabindex="-1">ALZ release changes, explained</h1>
 				<p>
-					Compare two Azure Landing Zones Library releases. This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
+					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases. This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
 				</p>
 			</div>
 		</section>
@@ -761,6 +761,8 @@
 		font-weight: 680;
 	}
 	.intro p { max-width: 620px; margin: 16px auto 0; color: #53657b; font-size: 16px; }
+	.intro a { color: #315e91; text-decoration: underline; text-underline-offset: 3px; }
+	.intro a:hover { color: #145bc0; }
 	.comparison-form {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) auto;

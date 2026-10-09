@@ -70,6 +70,9 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByRole('link', { name: 'ALZ Release Brief home' })).toBeVisible();
 	await expect.poll(() => page.locator('.brand-mark').evaluate((image) =>
 		image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+	const upstreamLink = page.getByRole('link', { name: 'Azure Landing Zones Library', exact: true });
+	await expect(upstreamLink).toHaveAttribute('href', 'https://github.com/Azure/azure-landing-zones-library');
+	await expect(upstreamLink).toHaveAttribute('target', '_blank');
 	await expect(page.getByLabel(/FROM Release/)).toHaveValue(releases[1].tag);
 	await expect(page.locator('footer')).toHaveCount(0);
 	await expect(page.locator('.scope-note')).toHaveCount(0);
@@ -123,7 +126,7 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
 	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.locator('.change-controls input')).toHaveCount(1);
-	await expect(page.locator('.change-controls select')).toHaveCount(1);
+	await expect(page.locator('.change-controls select')).toHaveCount(2);
 	await expect(fileSummary).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
