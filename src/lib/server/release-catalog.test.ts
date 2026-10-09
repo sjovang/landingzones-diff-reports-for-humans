@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import git from 'isomorphic-git';
 import type { ReleaseCatalog, StoredRelease } from '../types.js';
 
+vi.mock('isomorphic-git', () => ({ default: { getRemoteInfo: vi.fn() } }));
+vi.mock('isomorphic-git/http/node', () => ({ default: {} }));
 vi.mock('./storage.js', () => ({
 	loadReleaseCatalog: vi.fn(),
 	saveReleaseCatalog: vi.fn(),
@@ -32,23 +35,35 @@ const catalog: ReleaseCatalog = { schemaVersion: 1, syncedAt: '2026-01-01T00:00:
 const stored = { catalog, etag: '"previous-revision"' };
 const slzReleases = releases.map((release) => ({ ...release, tag: release.tag.replace('/alz/', '/slz/') }));
 
+function remoteInfo(releasesToExpose: StoredRelease[]) {
+	const tags: Record<string, unknown> = {};
+	for (const release of releasesToExpose) {
+		const parts = release.tag.split('/');
+		let node = tags;
+		for (const part of parts.slice(0, -1)) {
+			node[part] ??= {};
+			node = node[part] as Record<string, unknown>;
+		}
+		node[parts.at(-1)!] = release.referenceSha;
+	}
+	return { capabilities: [], refs: { tags } } as Awaited<ReturnType<typeof git.getRemoteInfo>>;
+}
+
+function stubReleaseRefs(releasesToExpose: StoredRelease[] = [...releases, ...slzReleases]) {
+	vi.mocked(git.getRemoteInfo).mockResolvedValue(remoteInfo(releasesToExpose));
+}
+
 function successfulSyncFetch() {
-	return vi.fn(async (url: string) => {
-		if (url.includes('/contents/')) return Response.json({
-			encoding: 'base64',
-			content: Buffer.from(JSON.stringify({ dependencies: [{ path: 'platform/alz', ref: releases[0].version }] })).toString('base64')
-		});
-		const stream = url.includes('/slz/') ? slzReleases : releases;
-		return Response.json(stream.map((release) => ({
-			ref: `refs/tags/${release.tag}`, object: { type: 'commit', sha: release.sha }
-		})));
-	});
+	return vi.fn(async () => Response.json({
+		dependencies: [{ path: 'platform/alz', ref: releases[0].version }]
+	}));
 }
 
 beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(loadReleaseCatalog).mockResolvedValue(stored);
 	vi.mocked(getReleaseSnapshot).mockResolvedValue(new Map());
+	stubReleaseRefs();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -125,11 +140,12 @@ describe('durable ALZ release catalog', () => {
 			.toBeLessThan(vi.mocked(saveReleaseCatalog).mock.invocationCallOrder[0]);
 	});
 
-	it('retains the last catalog on rate limits, empty discovery, or snapshot failure', async () => {
-		vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 429 })));
-		await expect(syncLibraryReleases()).rejects.toThrow('rate limit');
-		vi.stubGlobal('fetch', vi.fn(async () => Response.json([])));
+	it('retains the last catalog when Git refs are unavailable, empty, or snapshot retrieval fails', async () => {
+		vi.mocked(git.getRemoteInfo).mockRejectedValueOnce(new Error('remote unavailable'));
+		await expect(syncLibraryReleases()).rejects.toThrow('upstream library could not be reached');
+		stubReleaseRefs([]);
 		await expect(syncLibraryReleases()).rejects.toThrow('no ALZ releases');
+		stubReleaseRefs();
 		vi.stubGlobal('fetch', successfulSyncFetch());
 		vi.mocked(getReleaseSnapshot).mockRejectedValueOnce(new Error('Git unavailable'));
 		await expect(syncLibraryReleases()).rejects.toThrow('Git unavailable');
@@ -138,15 +154,8 @@ describe('durable ALZ release catalog', () => {
 	});
 
 	it('does not publish partial results when an annotated tag cannot be resolved', async () => {
-		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-			if (url.includes('/git/tags/')) return new Response('', { status: 429 });
-			if (url.includes('/slz/')) return Response.json([]);
-			return Response.json([
-				{ ref: `refs/tags/${releases[0].tag}`, object: { type: 'commit', sha: releases[0].sha } },
-				{ ref: `refs/tags/${releases[1].tag}`, object: { type: 'tag', sha: 'a'.repeat(40) } }
-			]);
-		}));
-		await expect(syncLibraryReleases()).rejects.toThrow('rate limit');
+		stubReleaseRefs([{ ...releases[0], referenceSha: 'invalid-sha' }]);
+		await expect(syncLibraryReleases()).rejects.toThrow('invalid commit reference');
 		expect(saveReleaseCatalog).not.toHaveBeenCalled();
 		expect(getReleaseSnapshot).not.toHaveBeenCalled();
 	});
@@ -162,31 +171,24 @@ describe('durable ALZ release catalog', () => {
 		vi.stubGlobal('fetch', successfulSyncFetch());
 		const first = await syncLibraryReleases();
 		vi.mocked(loadReleaseCatalog).mockResolvedValue({ catalog: first, etag: '"next"' });
-		const fetchMock = successfulSyncFetch();
-		const success = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation(async (url) => url.includes('/alz/')
-			? Response.json(releases.map((release, index) => ({
-				ref: `refs/tags/${release.tag}`, object: { type: 'commit', sha: index === 0 ? '3'.repeat(40) : release.sha }
-			}))) : success(url));
+		const movedRelease = { ...releases[0], sha: '3'.repeat(40), referenceSha: '3'.repeat(40) };
+		stubReleaseRefs([movedRelease, releases[1], ...slzReleases]);
+		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
 		const next = await syncLibraryReleases();
-		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(fetchMock.mock.calls.every(([url]) => !url.includes('/contents/'))).toBe(true);
+		expect(fetchMock).not.toHaveBeenCalled();
 		expect(next.releases[2].dependency?.sha).toBe('3'.repeat(40));
 	});
 
 	it('retains the catalog when a pinned dependency cannot be resolved or metadata is invalid', async () => {
 		const fetchMock = successfulSyncFetch();
-		const success = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation(async (url) => url.includes('/contents/')
-			? Response.json({ encoding: 'base64', content: Buffer.from(JSON.stringify({
-				dependencies: [{ path: 'platform/alz', ref: '9.0.0' }]
-			})).toString('base64') }) : success(url));
+		fetchMock.mockImplementation(async () => Response.json({
+			dependencies: [{ path: 'platform/alz', ref: '9.0.0' }]
+		}));
 		vi.stubGlobal('fetch', fetchMock);
 		await expect(syncLibraryReleases()).rejects.toThrow('pinned ALZ dependency');
 		expect(saveReleaseCatalog).not.toHaveBeenCalled();
-		fetchMock.mockImplementation(async (url) => url.includes('/contents/')
-			? Response.json({ encoding: 'base64', content: Buffer.from('invalid').toString('base64') }) : success(url));
+		fetchMock.mockImplementation(async () => new Response('invalid'));
 		await expect(syncLibraryReleases()).rejects.toThrow('metadata is invalid');
 		expect(saveReleaseCatalog).not.toHaveBeenCalled();
 	});

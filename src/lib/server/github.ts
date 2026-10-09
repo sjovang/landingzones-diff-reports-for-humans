@@ -1,19 +1,20 @@
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node';
 import { AppError } from './errors.js';
 import type { LibraryRelease, StoredRelease } from '../types.js';
-import { libraryForTag, libraryScope, type Library } from '../libraries.js';
+import { libraryForTag, type Library } from '../libraries.js';
 
 const OWNER = 'Azure';
 const REPOSITORY = 'Azure-Landing-Zones-Library';
-const API_BASE = `https://api.github.com/repos/${OWNER}/${REPOSITORY}`;
+const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
+const RAW_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPOSITORY}`;
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 interface GitReference {
-	ref: string;
-	object: { type: string; sha: string };
-}
-
-interface GitTag {
-	object: { type: string; sha: string };
+	tag: string;
+	referenceSha: string;
+	sha: string;
 }
 
 function parseVersion(tag: string) {
@@ -44,39 +45,39 @@ function releaseUrl(tag: string) {
 	return `https://github.com/${OWNER}/${REPOSITORY}/tree/${tag.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-async function getJson<T>(url: string): Promise<T> {
-	let response: Response;
-	const token = process.env.GITHUB_TOKEN;
+function flattenRefs(value: unknown, prefix = '', refs: Array<[string, string]> = []): Array<[string, string]> {
+	if (!value || typeof value !== 'object') return refs;
+	for (const [name, entry] of Object.entries(value)) {
+		const ref = prefix ? `${prefix}/${name}` : name;
+		if (typeof entry === 'string') refs.push([ref, entry]);
+		else flattenRefs(entry, ref, refs);
+	}
+	return refs;
+}
+
+async function getReleaseReferences(library: Library): Promise<GitReference[]> {
+	let info: Awaited<ReturnType<typeof git.getRemoteInfo>>;
 	try {
-		response = await fetch(url, {
-			headers: {
-				accept: 'application/vnd.github+json',
-				'X-GitHub-Api-Version': '2022-11-28',
-				'user-agent': 'alz-library-diff',
-				...(token ? { authorization: `Bearer ${token}` } : {})
-			},
-			signal: AbortSignal.timeout(15_000)
-		});
+		info = await git.getRemoteInfo({ http, url: REPOSITORY_URL });
 	} catch (error) {
-		console.error('GitHub request failed before a response was received.', error);
-		throw new AppError('GitHub could not be reached. Check the connection and try again.', 502);
+		console.error('Git could not retrieve upstream release references.', error);
+		throw new AppError('The upstream library could not be reached. Check the connection and try again.', 502);
 	}
 
-	if (!response.ok) {
-		const remaining = response.headers.get('x-ratelimit-remaining');
-		const retryAfter = response.headers.get('retry-after');
-		const rateLimited = response.status === 429 || (response.status === 403 && remaining === '0');
-		const wait = retryAfter ? ` Try again in ${retryAfter} seconds.` : '';
-		if (rateLimited) {
-			throw new AppError(`GitHub API rate limit reached.${wait}`, 429);
+	const tagRefs = flattenRefs(info.refs?.tags);
+	const peeledRefs = new Map(tagRefs
+		.filter(([tag]) => tag.endsWith('^{}'))
+		.map(([tag, sha]) => [tag.slice(0, -3), sha]));
+	const releases: GitReference[] = [];
+	for (const [tag, referenceSha] of tagRefs) {
+		if (tag.endsWith('^{}') || libraryForTag(tag) !== library) continue;
+		const sha = peeledRefs.get(tag) ?? referenceSha;
+		if (!SHA_PATTERN.test(referenceSha) || !SHA_PATTERN.test(sha)) {
+			throw new AppError(`The upstream release tag ${tag} has an invalid commit reference.`, 502);
 		}
-		if (response.status === 404) {
-			throw new AppError('The requested library release was not found in the upstream repository.', 404);
-		}
-		throw new AppError(`GitHub returned ${response.status} while reading release data. Try again later.`, 502);
+		releases.push({ tag, referenceSha, sha });
 	}
-
-	return (await response.json()) as T;
+	return releases;
 }
 
 export async function discoverAlzReleases(previous: StoredRelease[] = []): Promise<StoredRelease[]> {
@@ -84,51 +85,40 @@ export async function discoverAlzReleases(previous: StoredRelease[] = []): Promi
 }
 
 export async function discoverReleases(library: Library, previous: StoredRelease[] = []): Promise<StoredRelease[]> {
-	// Matching refs returns all matches; this endpoint does not support pagination.
-	const references = await getJson<GitReference[]>(`${API_BASE}/git/matching-refs/tags/${libraryScope(library)}`);
-
 	const releases: StoredRelease[] = [];
-	for (const reference of references) {
-		const tag = reference.ref.replace(/^refs\/tags\//, '');
-		if (libraryForTag(tag) !== library) continue;
-		const cached = previous.find((release) => release.tag === tag && release.referenceSha === reference.object.sha);
-		const sha = cached?.sha ?? await resolveReferenceCommit(tag, reference.object);
-		releases.push({ tag, version: parseVersion(tag)!.version, url: releaseUrl(tag), sha, referenceSha: reference.object.sha });
+	for (const reference of await getReleaseReferences(library)) {
+		const cached = previous.find((release) => release.tag === reference.tag && release.referenceSha === reference.referenceSha);
+		releases.push({
+			tag: reference.tag,
+			version: parseVersion(reference.tag)!.version,
+			url: releaseUrl(reference.tag),
+			sha: cached?.sha ?? reference.sha.toLowerCase(),
+			referenceSha: reference.referenceSha.toLowerCase()
+		});
 	}
 
 	return [...new Map(releases.map((release) => [release.tag, release])).values()].sort(compareReleases);
 }
 
-async function resolveReferenceCommit(tag: string, reference: GitReference['object']): Promise<string> {
-	if (!libraryForTag(tag)) throw new AppError('Choose a published ALZ or SLZ release tag.', 400);
-
-	let object = reference;
-	const seen = new Set<string>();
-
-	for (let depth = 0; object.type === 'tag'; depth += 1) {
-		if (depth >= 8 || seen.has(object.sha)) {
-			throw new AppError(`The upstream tag ${tag} has an invalid tag-object chain.`, 502);
-		}
-		seen.add(object.sha);
-		const annotatedTag = await getJson<GitTag>(`${API_BASE}/git/tags/${encodeURIComponent(object.sha)}`);
-		object = annotatedTag.object;
-	}
-
-	if (object.type !== 'commit' || !/^[0-9a-f]{40}$/i.test(object.sha)) {
-		throw new AppError(`The upstream tag ${tag} does not point to a commit.`, 502);
-	}
-	return object.sha.toLowerCase();
-}
-
 export async function discoverSlzDependency(release: StoredRelease): Promise<string> {
-	const file = await getJson<{ content?: string; encoding?: string }>(
-		`${API_BASE}/contents/platform/slz/alz_library_metadata.json?ref=${encodeURIComponent(release.sha)}`);
-	if (file.encoding !== 'base64' || typeof file.content !== 'string') {
+	if (!SHA_PATTERN.test(release.sha)) throw new AppError('The SLZ release has an invalid commit reference.', 502);
+	let response: Response;
+	try {
+		response = await fetch(`${RAW_BASE}/${release.sha}/platform/slz/alz_library_metadata.json`, {
+			headers: { 'user-agent': 'alz-library-diff' },
+			signal: AbortSignal.timeout(15_000)
+		});
+	} catch (error) {
+		console.error('GitHub request failed while reading SLZ dependency metadata.', error);
+		throw new AppError('SLZ dependency metadata could not be retrieved. Try again later.', 502);
+	}
+	if (!response.ok) {
 		throw new AppError(`SLZ dependency metadata is unavailable for ${release.tag}.`, 502);
 	}
+
 	let metadata: unknown;
 	try {
-		metadata = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+		metadata = await response.json();
 	} catch (error) {
 		console.error('Invalid SLZ dependency metadata.', { tag: release.tag, error });
 		throw new AppError(`SLZ dependency metadata is invalid for ${release.tag}.`, 502);

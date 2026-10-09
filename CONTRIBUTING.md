@@ -92,7 +92,7 @@ neither local `.env` configuration nor host-provided storage settings; copy
 
 ## Release synchronization and caching
 
-`RELEASE_SYNC_SCHEDULE` is a six-field NCRONTAB expression in UTC, defaulting to `0 0 * * * *` (hourly). The Functions host must be running for the timer to execute; starting only the web app does not schedule syncs. `npm run releases:sync` runs the same sync manually without Core Tools. `GITHUB_TOKEN`, if configured, is used only during discovery.
+`RELEASE_SYNC_SCHEDULE` is a six-field NCRONTAB expression in UTC, defaulting to `0 0 * * * *` (hourly). The Functions host must be running for the timer to execute; starting only the web app does not schedule syncs. `npm run releases:sync` runs the same sync manually without Core Tools. Release refs and snapshots use Git's HTTPS transport, and metadata uses raw GitHub content, so no GitHub API token is required.
 
 See [Release catalog and comparison data](docs/TECHNICAL_OVERVIEW.md#release-catalog-and-comparison-data) for how synchronization, snapshots, and cached reports work.
 
@@ -101,5 +101,5 @@ See [Release catalog and comparison data](docs/TECHNICAL_OVERVIEW.md#release-cat
 - `npm run check` runs the Svelte and TypeScript checks.
 - `npm run build` builds the App Service app.
 - `npm run build:functions` compiles the Functions worker.
-- `npm run test:unit` runs the semantic policy analysis and GitHub API tests.
+- `npm run test:unit` runs the semantic policy analysis and upstream Git/ref tests.
 - `npx playwright install chromium` installs the browser once; `npm run test:e2e` runs the browser flow.

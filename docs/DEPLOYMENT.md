@@ -86,7 +86,8 @@ a draft. Resume it through
 tags are reused only after their source revision and version are checked;
 already attached assets are retained and checked, never overwritten. Do not
 publish the draft manually before all artifacts have been attached. The GHCR
-package is private by default.
+package is public, so App Service can pull published web images without
+registry credentials.
 
 ## First deployment
 
@@ -112,21 +113,8 @@ azd provision --preview
 azd provision
 ```
 
-Because the GHCR package is private, configure App Service's registry
-credentials before deploying the web image. Bicep sets
-`DOCKER_REGISTRY_SERVER_URL` to `https://ghcr.io`. In the Azure portal, open
-the web App Service's **Configuration** page and add:
-
-- `DOCKER_REGISTRY_SERVER_USERNAME`: your GitHub username
-- `DOCKER_REGISTRY_SERVER_PASSWORD`: a GitHub classic personal access token
-  with `read:packages` permission and access to this package
-
-Add the username and token through the portal's secure configuration UI; do
-not put the token in source control, the `azd` environment, or command-line
-arguments. Restart the web app after saving the settings.
-
-Bicep preserves these portal-managed registry credentials on subsequent
-provisioning runs while updating the application's non-secret settings.
+The GHCR package is public, so no registry username or token is needed. Bicep
+configures App Service to pull from `https://ghcr.io`.
 
 Then deploy both services:
 
@@ -136,15 +124,13 @@ azd deploy worker --from-package .azure-build/releases/v0.1.0/functions-v0.1.0.z
 ```
 
 The web app URL is printed by `azd` and is also available in the Azure portal.
-The first scheduled release sync runs hourly. An optional `GITHUB_TOKEN`
-application setting on the Function App increases the upstream GitHub API rate
-limit; configure it in Azure if needed and keep it out of source control.
-Bicep preserves optional portal-managed Function App settings, including this
-token, on subsequent provisioning runs.
+The first scheduled release sync runs hourly. The worker reads refs through
+Git's HTTPS transport and release metadata from raw GitHub content, avoiding
+GitHub's REST API rate limits; no GitHub API token is required.
 
 After first-time setup, `azd up` can provision and deploy both services in one
-step, provided `WEB_IMAGE` points to an image that exists and the GHCR pull
-credentials are configured. Its worker deployment builds the local checkout;
+step, provided `WEB_IMAGE` points to an image that exists. Its worker
+deployment builds the local checkout;
 use the versioned ZIP commands above when deploying published releases.
 
 ## Deploy code changes
