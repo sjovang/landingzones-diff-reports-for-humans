@@ -1,5 +1,30 @@
 # Contributing
 
+## Project naming
+
+The product is **Landing Zone Release Brief**. The repository and npm package
+are named `alzlib-diff-for-humans`; deployment identifiers use that same name.
+`private: true` in `package.json` prevents accidental npm publication, not
+public access to the GitHub repository. The package version tracks the app's
+release version, not the upstream ALZ or SLZ releases being compared.
+
+## Releases
+
+Use Conventional Commit titles for squash merges: `fix:` bumps the patch,
+`feat:` bumps the minor, and `feat!:` or a `BREAKING CHANGE:` footer indicates
+a breaking change. Before 1.0.0, breaking changes bump the minor; after 1.0.0,
+they bump the major. `chore:` and documentation-only changes do not normally
+create a release.
+
+Release-please maintains `package.json`, `package-lock.json`, the release
+manifest, and `CHANGELOG.md` through a release PR. The initial manifest matches
+the current `0.0.1` package version; future versions are derived from commits,
+not manually selected. The web image and Functions ZIP share that version.
+Artifacts are built from the release tag, attached while the release is a
+draft, then locked when it is published. See the
+[deployment guide](docs/DEPLOYMENT.md#publish-release-artifacts) for publication,
+failed-draft recovery, and digest-pinned local deployment.
+
 ## Local development
 
 Requirements: Node.js 22+, Git, and [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local).

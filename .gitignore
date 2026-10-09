@@ -30,6 +30,8 @@ local.settings.json
 /dist-functions
 /.azurite
 /.azurite*
+/.azure/
+/.azure-build/
 
 # Local design-tool session state
 /.impeccable/hook.cache.json

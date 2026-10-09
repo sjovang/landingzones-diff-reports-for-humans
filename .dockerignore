@@ -1,0 +1,14 @@
+.git
+.github
+.azure
+.azure-build
+.azurite
+.svelte-kit
+build
+dist-functions
+node_modules
+local.settings.json
+.env
+.env.*
+playwright-report
+test-results

@@ -1,12 +1,23 @@
 {
-	"name": "sjovang-literate-sniffle",
+	"name": "alzlib-diff-for-humans",
+	"description": "Landing Zone Release Brief: human-readable comparisons of ALZ and SLZ library releases.",
 	"private": true,
 	"version": "0.0.1",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/sjovang/alzlib-diff-for-humans.git"
+	},
+	"bugs": {
+		"url": "https://github.com/sjovang/alzlib-diff-for-humans/issues"
+	},
+	"homepage": "https://github.com/sjovang/alzlib-diff-for-humans#readme",
 	"type": "module",
 	"scripts": {
 		"dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev",
 		"dev:all": "node scripts/dev-all.mjs",
 		"build": "vite build",
+		"package:functions": "node scripts/package-functions.mjs",
 		"preview": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js preview",
 		"start": "node --env-file-if-exists=.env build/index.js",
 		"build:functions": "tsc -p tsconfig.functions.json",

@@ -1,0 +1,190 @@
+name: Release artifacts
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag to resume (for example v0.1.0)
+        required: true
+        type: string
+
+concurrency:
+  group: release-artifacts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Require native release immutability
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled' | grep -qx true
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  artifacts:
+    needs: release-please
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || needs.release-please.outputs.tag }}
+    steps:
+      - name: Validate draft release and immutability
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled' | grep -qx true
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' | grep -qx true
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - name: Verify release version
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json'));
+          const lock = JSON.parse(readFileSync('package-lock.json'));
+          const manifest = JSON.parse(readFileSync('.release-please-manifest.json'));
+          assert.equal(`v${pkg.version}`, process.env.RELEASE_TAG);
+          assert.equal(lock.version, pkg.version);
+          assert.equal(lock.packages[''].version, pkg.version);
+          assert.equal(manifest['.'], pkg.version);
+          NODE
+          echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check && npm run test:unit
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Check for an already published version
+        id: image
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY%/*}
+          package=${GITHUB_REPOSITORY#*/}
+          type=$(gh api "users/$owner" --jq '.type')
+          if [[ "$type" == Organization ]]; then
+            endpoint="orgs/$owner"
+          else
+            endpoint="users/$owner"
+          fi
+          if gh api --paginate "$endpoint/packages/container/$package/versions" --jq '.[].metadata.container.tags[]' >tags.txt 2>package-error.log; then
+            if grep -qx "$RELEASE_TAG" tags.txt; then
+              exists=true
+            else
+              exists=false
+            fi
+          elif grep -q 'Package not found.*HTTP 404' package-error.log; then
+            exists=false
+          else
+            cat package-error.log >&2
+            exit 1
+          fi
+          if [[ "$exists" == true ]]; then
+            docker pull "$IMAGE:$RELEASE_TAG"
+            docker image inspect "$IMAGE:$RELEASE_TAG" --format '{{json .Config.Labels}}' > labels.json
+            node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const labels = JSON.parse(readFileSync('labels.json'));
+          assert.equal(labels['org.opencontainers.image.revision'], process.env.RELEASE_SHA);
+          assert.equal(labels['org.opencontainers.image.version'], process.env.RELEASE_TAG);
+          NODE
+          fi
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          rm -f tags.txt package-error.log labels.json
+      - name: Publish versioned web image once
+        if: steps.image.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.RELEASE_TAG }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
+      - name: Record immutable image reference
+        run: |
+          set -euo pipefail
+          mkdir -p .azure-build/release
+          digest=$(docker buildx imagetools inspect "$IMAGE:$RELEASE_TAG" --format '{{json .Manifest}}' | jq -er '.digest')
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf '%s@%s\n' "$IMAGE" "$digest" > .azure-build/release/web-image.txt
+      - name: Restore worker asset when resuming a draft
+        id: worker
+        run: |
+          set -euo pipefail
+          name="functions-$RELEASE_TAG.zip"
+          assets=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if grep -qx "$name" <<< "$assets"; then
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir .azure-build/release
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Package versioned worker
+        if: steps.worker.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          npm run package:functions
+          cd .azure-build/functions
+          zip -qr "../release/functions-$RELEASE_TAG.zip" . -x .funcignore
+      - name: Attach artifacts without replacing existing assets
+        run: |
+          set -euo pipefail
+          cd .azure-build/release
+          sha256sum "functions-$RELEASE_TAG.zip" web-image.txt > SHA256SUMS
+          assets=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for asset in "functions-$RELEASE_TAG.zip" web-image.txt SHA256SUMS; do
+            if grep -qx "$asset" <<< "$assets"; then
+              mkdir -p existing
+              gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir existing
+              cmp "$asset" "existing/$asset"
+            else
+              gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+            fi
+          done
+      - name: Publish and lock the completed release
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled' | grep -qx true
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.immutable' | grep -qx true
