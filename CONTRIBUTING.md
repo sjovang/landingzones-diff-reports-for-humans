@@ -34,6 +34,20 @@ and exits with an error.
 For custom setups, `npm run storage:start`, `npm run releases:sync`,
 `npm run functions:start`, and `npm run dev` remain available.
 
+### Running in the GitHub Copilot app
+
+Review and accept `.github/github-app.yml` when the app prompts you. It
+installs dependencies with `npm ci` when a new session is created and adds a
+manual **Run locally** action that runs `npm run dev:all`. For an existing
+session without dependencies, run **Setup** first.
+
+Once all services are ready, the app opens the local instance in its integrated
+browser. Node.js, Git, and Azure Functions Core Tools v4 must already be
+installed on the execution host. Only run one local instance at a time because
+the services use fixed ports. Stop the run script in the app to shut down its
+services. Repository configuration changes must be reviewed and accepted again
+before the app uses them.
+
 Azurite listens on its standard Blob, Queue, and Table ports. The local emulator skips API-version validation because current Azure Storage SDKs can send a version newer than Azurite supports; this option affects only the local emulator, not Azure Storage. The `.env` and Functions local settings file are ignored by Git. Page loads read the synchronized ALZ/SLZ catalog; choosing a same-library pair queues report generation. Completed reports are reused by repository, library scope, selected tags, commit SHAs, pinned dependency SHAs, and report schema version. Keep the Functions worker running alongside the web app: without it, only already-cached comparisons complete. Queue messages are plain JSON, so `host.json` explicitly sets queue `messageEncoding` to `none` to match the storage SDK producer.
 
 `npm run dev`, `npm run preview`, and `npm start` load server configuration from
