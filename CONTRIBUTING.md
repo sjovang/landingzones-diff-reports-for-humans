@@ -1,5 +1,13 @@
 # Contributing
 
+## Project naming
+
+The product is **Landing Zone Release Brief**. The repository and npm package
+are named `alzlib-diff-for-humans`; deployment identifiers use that same name.
+`private: true` in `package.json` prevents accidental npm publication, not
+public access to the GitHub repository. The package version tracks the app's
+release version, not the upstream ALZ or SLZ releases being compared.
+
 ## Local development
 
 Requirements: Node.js 22+, Git, and [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local).
