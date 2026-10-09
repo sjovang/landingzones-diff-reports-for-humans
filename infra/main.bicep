@@ -4,7 +4,7 @@ param environmentName string
 @description('Azure region for the application resources.')
 param location string = resourceGroup().location
 
-@description('Full OCI image reference for the web app, including its tag.')
+@description('Immutable OCI image reference for the web app, including its sha256 digest.')
 param webImage string
 
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location, environmentName)

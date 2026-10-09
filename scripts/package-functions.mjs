@@ -32,5 +32,9 @@ const functionPackage = {
 };
 
 await writeFile(join(output, 'package.json'), `${JSON.stringify(functionPackage, null, 2)}\n`);
-run(packageManager, ['install', '--package-lock-only', '--omit=dev', '--ignore-scripts'], output);
+const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+lock.name = functionPackage.name;
+lock.version = functionPackage.version;
+lock.packages[''] = functionPackage;
+await writeFile(join(output, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
 run(packageManager, ['ci', '--omit=dev', '--ignore-scripts'], output);

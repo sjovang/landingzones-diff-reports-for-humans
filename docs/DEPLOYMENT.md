@@ -20,9 +20,11 @@ The Basic plan provides a simple, always-on starting point for this small
 application. It does not autoscale; revisit the hosting plan if workload or
 availability requirements change.
 
-The web image is built in GitHub Actions and published to the repository's
-private GHCR package with both an immutable commit-SHA tag and a `latest` tag.
-The workflow does not authenticate to Azure or deploy anything. `azd` uses
+Release-please manages one SemVer version for the web app and Functions worker.
+The release workflow publishes a `vMAJOR.MINOR.PATCH` web image to GHCR and a
+versioned Functions ZIP to an immutable GitHub release. There is no `latest`
+or rolling major/minor image tag. The workflow does not authenticate to Azure
+or deploy anything. `azd` uses
 image passthrough, so it updates the App Service image reference without
 building or uploading the web application from the local checkout. The
 Functions worker continues to be packaged and deployed locally.
@@ -46,29 +48,54 @@ The signed-in Azure identity needs permission to create the listed resources and
 to create role assignments in the target subscription/resource group. Resource
 creation incurs Azure charges.
 
-## Publish the web image
+## Publish release artifacts
 
-After the workflow is merged to the repository's default branch, run **Build
-web container image** from the Actions tab, or push to `main`. The workflow
-publishes:
+After the workflow is merged to `main`, Conventional Commits drive a
+release-please PR that updates package versions and the changelog. Merging that
+PR creates a draft release, builds artifacts from its exact tag, attaches the
+Functions ZIP, `web-image.txt`, and `SHA256SUMS`, then publishes the release.
 
 ```text
-ghcr.io/sjovang/alzlib-diff-for-humans:<commit-sha>
+ghcr.io/sjovang/alzlib-diff-for-humans:v0.1.0
+functions-v0.1.0.zip
+web-image.txt
+SHA256SUMS
 ```
 
-Use the SHA tag for deployment rather than `latest`, so the deployed version is
-reproducible. The package is private by default.
+`web-image.txt` contains the immutable `ghcr.io/...@sha256:...` reference to
+deploy, not the version tag. GHCR tags are technically mutable; the workflow
+does not overwrite existing version tags, and deployments use the digest so
+they cannot silently change. GitHub's native release immutability locks the
+published tag and attached assets. Do not delete published images; roll back
+by selecting an earlier digest, or fix a release with a new SemVer version.
+
+The repository must have **immutable releases** enabled and **Allow GitHub
+Actions to create and approve pull requests** enabled in its Actions settings.
+Both settings were enabled when this workflow was introduced. The workflow
+fails rather than publishing an unlocked release if immutability is disabled.
+It uses the built-in `GITHUB_TOKEN`; artifact publication runs in the same
+workflow because releases created with that token do not trigger another
+release-event workflow. No Azure credential is required.
+
+If artifact publication fails, the release stays a draft. Resume it through
+**Release artifacts** in the Actions tab with the existing tag. Existing image
+tags are reused only after their source revision and version are checked;
+already attached assets are retained and checked, never overwritten. Do not
+publish the draft manually before all artifacts have been attached. The GHCR
+package is private by default.
 
 ## First deployment
 
 Create a local `azd` environment, choose the subscription and region, and set
-`WEB_IMAGE` to a SHA-tagged image that the workflow has already published:
+`WEB_IMAGE` to the digest reference from a published release's `web-image.txt`:
 
 ```sh
 azd env new dev
 azd env set AZURE_SUBSCRIPTION_ID <subscription-id>
 azd env set AZURE_LOCATION <azure-region>
-azd env set WEB_IMAGE ghcr.io/sjovang/alzlib-diff-for-humans:<commit-sha>
+gh release download v0.1.0 --pattern 'web-image.txt' --pattern 'SHA256SUMS' --pattern 'functions-v0.1.0.zip' --dir .azure-build/releases/v0.1.0
+(cd .azure-build/releases/v0.1.0 && shasum -a 256 -c SHA256SUMS)
+azd env set WEB_IMAGE "$(cat .azure-build/releases/v0.1.0/web-image.txt)"
 ```
 
 The `.azure/` directory contains local environment state and is ignored by Git.
@@ -101,7 +128,7 @@ Then deploy both services:
 
 ```sh
 azd deploy web
-azd deploy worker
+azd deploy worker --from-package .azure-build/releases/v0.1.0/functions-v0.1.0.zip
 ```
 
 The web app URL is printed by `azd` and is also available in the Azure portal.
@@ -111,19 +138,23 @@ limit; configure it in Azure if needed and keep it out of source control.
 
 After first-time setup, `azd up` can provision and deploy both services in one
 step, provided `WEB_IMAGE` points to an image that exists and the GHCR pull
-credentials are configured.
+credentials are configured. Its worker deployment builds the local checkout;
+use the versioned ZIP commands above when deploying published releases.
 
 ## Deploy code changes
 
-Run the image workflow for the commit you want to deploy, then set the new
-SHA-tagged reference in the local `azd` environment and deploy it:
+Download the selected release, verify its checksums, and deploy both artifacts
+from your local terminal (replace `v0.1.0` with the desired release):
 
 ```sh
-azd env set WEB_IMAGE ghcr.io/sjovang/alzlib-diff-for-humans:<commit-sha>
+gh release download v0.1.0 --pattern 'web-image.txt' --pattern 'SHA256SUMS' --pattern 'functions-v0.1.0.zip' --dir .azure-build/releases/v0.1.0
+(cd .azure-build/releases/v0.1.0 && shasum -a 256 -c SHA256SUMS)
+azd env set WEB_IMAGE "$(cat .azure-build/releases/v0.1.0/web-image.txt)"
 azd deploy web
+azd deploy worker --from-package .azure-build/releases/v0.1.0/functions-v0.1.0.zip
 ```
 
-Deploy Functions changes from the local checkout:
+For unreleased development changes, deploy Functions from the local checkout:
 
 ```sh
 azd deploy worker
