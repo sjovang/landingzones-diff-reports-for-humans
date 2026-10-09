@@ -319,6 +319,7 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 	});
 	expect(filterLayout.search.right).toBeLessThanOrEqual(filterLayout.toolbar.right + 1);
 	expect(filterLayout.controlHeights.every((height) => height >= 44)).toBe(true);
+	if (page.viewportSize()!.width <= 650) expect(filterLayout.controlHeights.at(-1)).toBeLessThanOrEqual(48);
 	for (const fieldStyle of [filterLayout.statusStyle, filterLayout.typeStyle]) {
 		expect(fieldStyle.borderTopWidth).toBe(filterLayout.searchStyle.borderTopWidth);
 		expect(fieldStyle.borderTopColor).toBe(filterLayout.searchStyle.borderTopColor);

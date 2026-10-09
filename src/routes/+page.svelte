@@ -1001,7 +1001,7 @@
 		.status-filter select { flex: 1; max-width: none; }
 		.type-filter { width: 100%; justify-content: space-between; }
 		.type-filter select { flex: 1; max-width: none; }
-		.search-field { width: 100%; margin-left: 0; }
+		.search-field { flex: 0 0 auto; width: 100%; margin-left: 0; }
 		.search-field input { width: 100%; }
 		.search-field input { font-size: 16px; }
 		.file-change summary { grid-template-columns: minmax(0, 1fr) auto 16px; gap: 10px 8px; padding: 16px 12px; }
