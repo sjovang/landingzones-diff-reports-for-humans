@@ -4,7 +4,9 @@
 	import { page } from '$app/state';
 	import brandIcon from '#lib/assets/favicon.svg';
 	import { assignmentChanges } from '../lib/assignment-changes.js';
-	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type AlzRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext } from '../lib/types.js';
+	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type AlzRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext, type ReleaseChange } from '../lib/types.js';
+
+	type ChangeFilter = 'added' | 'modified' | 'deprecated' | 'removed';
 
 	function assignmentFacts(assignments: PolicyAssignmentContext[]) {
 		return JSON.stringify(assignments.map(assignmentContextFacts));
@@ -25,6 +27,8 @@
 	let jobStatus = $state<ComparisonStatus | null>(null);
 	let pageError = $state('');
 	let search = $state('');
+	let selectedStatuses = $state<ChangeFilter[]>([]);
+	let kindFilter = $state('');
 	let announcement = $state('');
 	const lifecycle = new AbortController();
 	let disposed = false;
@@ -42,6 +46,12 @@
 		modified: 'Updated',
 		removed: 'Removed'
 	};
+	const statusFilters: { value: ChangeFilter; label: string }[] = [
+		{ value: 'added', label: 'New' },
+		{ value: 'modified', label: 'Updated' },
+		{ value: 'deprecated', label: 'Deprecated' },
+		{ value: 'removed', label: 'Removed' }
+	];
 	const statusIcons: Record<string, string> = {
 		added: 'M8 3v10M3 8h10',
 		modified: 'M12.5 6A5 5 0 0 0 3 5M3 1.5V5h3.5M3.5 10A5 5 0 0 0 13 11m0 3.5V11H9.5',
@@ -56,14 +66,36 @@
 		}))
 	);
 	const searchQuery = $derived(search.toLowerCase());
+	function matchesStatus(change: ReleaseChange) {
+		if (selectedStatuses.length === 0) return true;
+		return selectedStatuses.some((status) => {
+			if (status === 'deprecated') return Boolean(change.deprecated);
+			if (status === 'modified') return change.status === 'modified' && !change.deprecated;
+			return change.status === status;
+		});
+	}
 	const visibleChanges = $derived(
-		searchableChanges.filter(({ text }) => text.includes(searchQuery)).map(({ change }) => change)
+		searchableChanges.filter(({ change, text }) =>
+			matchesStatus(change) && (!kindFilter || change.kind === kindFilter) && text.includes(searchQuery))
+			.map(({ change }) => change)
 			.sort((a, b) => {
 				const order = (change: typeof a) => change.status === 'added' ? 0
 					: change.status === 'removed' ? 1 : change.deprecated ? 2 : 3;
 				return order(a) - order(b);
 			})
 	);
+
+	function toggleStatusFilter(status: ChangeFilter) {
+		selectedStatuses = selectedStatuses.includes(status)
+			? selectedStatuses.filter((selected) => selected !== status)
+			: [...selectedStatuses, status];
+	}
+
+	function clearFilters() {
+		search = '';
+		selectedStatuses = [];
+		kindFilter = '';
+	}
 
 	onMount(() => {
 		const params = new URL(window.location.href).searchParams;
@@ -206,7 +238,7 @@
 		jobStatus = null;
 		pageError = '';
 		announcement = '';
-		search = '';
+		clearFilters();
 
 		try {
 			const url = new URL(window.location.href);
@@ -439,7 +471,25 @@
 						<h3>What changed</h3>
 						<span aria-live="polite" aria-atomic="true">{visibleChanges.length} of {report.changes.length} updates</span>
 					</div>
-					<div class="change-controls">
+					<nav class="change-controls" aria-label="Filter library changes">
+						<div class="filter-options">
+							<div class="status-filters" role="group" aria-label="Filter by status">
+								{#each statusFilters as filter (filter.value)}
+									<button type="button" class="filter-chip" class:filter-chip-active={selectedStatuses.includes(filter.value)}
+										aria-pressed={selectedStatuses.includes(filter.value)}
+										onclick={() => toggleStatusFilter(filter.value)}>{filter.label}</button>
+								{/each}
+							</div>
+							<label class="type-filter">
+								<span>Type</span>
+								<select bind:value={kindFilter} aria-label="Filter by type">
+									<option value="">All types</option>
+									{#each Object.entries(kindLabels) as [kind, label] (kind)}
+										<option value={kind}>{label}</option>
+									{/each}
+								</select>
+							</label>
+						</div>
 						<label class="search-field">
 							<svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
 								<circle cx="8.8" cy="8.8" r="5.8" stroke="currentColor" stroke-width="1.5" />
@@ -448,7 +498,7 @@
 							<span class="sr-only">Search library changes</span>
 							<input bind:value={search} placeholder="Find a policy or scope" />
 						</label>
-					</div>
+					</nav>
 				</div>
 
 				{#if report.changes.length === 0}
@@ -458,6 +508,7 @@
 					</div>
 				{:else}
 				<div class="file-list">
+					{#if visibleChanges.length > 0}
 					{#each visibleChanges as change (change.id)}
 						<details class="file-change" open={expandedChanges[change.id] ?? false}
 							ontoggle={(event) => { expandedChanges[change.id] = event.currentTarget.open; }}>
@@ -612,12 +663,13 @@
 							</div>
 							{/if}
 						</details>
+					{/each}
 					{:else}
 						<div class="empty-filter">
-							<strong>No library changes match your search.</strong>
-							<button class="text-button" onclick={() => { search = ''; }}>Clear search</button>
+							<strong>No library changes match these filters.</strong>
+							<button class="text-button" onclick={clearFilters}>Clear filters</button>
 						</div>
-					{/each}
+					{/if}
 				</div>
 				{/if}
 
@@ -816,22 +868,29 @@
 	.added-count { color: #187348 !important; }
 	.removed-count { color: #b44347 !important; }
 	.changes-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 14px;
 		padding: 24px 0 13px;
 	}
 	.changes-heading > div:first-child { display: flex; align-items: baseline; gap: 11px; }
 	.changes-heading h3 { color: #20344c; font-size: 18px; letter-spacing: -0.02em; }
 	.changes-heading > div:first-child span { color: #52647b; font-size: 12px; }
-	.change-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+	.change-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; padding-bottom: 12px; border-bottom: 1px solid #cbd5e1; }
+	.filter-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+	.status-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+	.filter-chip { min-height: 44px; padding: 0 10px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #314e6d; font-size: 13px; font-weight: 600; cursor: pointer; }
+	.filter-chip:hover { background: #f4f7fb; }
+	.filter-chip-active { border-color: #9db8d8; background: #edf4fc; color: #192639; }
+	.type-filter { display: flex; min-height: 44px; align-items: center; gap: 8px; color: #52647b; font-size: 13px; font-weight: 600; }
+	.type-filter select { min-height: 44px; max-width: 220px; padding: 0 28px 0 10px; border: 1px solid #c5d0de; border-radius: 5px; background-color: #fff; color: #192639; font-size: 14px; }
 	.search-field { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 9px; }
+	.search-field { margin-left: auto; }
 	.search-field svg { width: 16px; height: 16px; color: #708198; }
 	.search-field input { width: 220px; min-width: 0; min-height: 44px; border: 0; background: transparent; color: #243950; font-size: 14px; }
 	.search-field input::placeholder { color: #52647b; opacity: 1; }
 	.search-field:focus-within { border-color: #3181dc; box-shadow: 0 0 0 2px #d8eaff; }
-	.file-list { border-top: 1px solid #cbd5e1; }
+	.file-list { border-top: 0; }
 	.file-change { border-bottom: 1px solid #d8e0e9; background: #fff; }
 	.file-change summary {
 		display: grid;
@@ -920,10 +979,8 @@
 		.comparison-form { grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); gap: 14px; }
 		.compare-button { grid-column: 1 / -1; justify-self: end; }
 		.comparison-form .compare-button { align-self: center; }
-		.changes-heading { align-items: flex-start; flex-direction: column; }
 		.file-change summary { grid-template-columns: 48px minmax(0, 1fr) 100px 20px; }
-		.change-controls { width: 100%; }
-		.search-field { flex: 1; }
+		.search-field { flex: 0 1 263px; }
 		.search-field input { width: 100%; }
 	}
 	@media (max-width: 650px) {
@@ -943,7 +1000,13 @@
 		.totals { gap: 13px; }
 		.changes-heading { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: start; gap: 12px; }
 		.changes-heading > div:first-child { justify-content: space-between; }
-		.change-controls { width: 100%; }
+		.change-controls { align-items: stretch; flex-direction: column; }
+		.filter-options { align-items: flex-start; flex-direction: column; }
+		.status-filters { width: 100%; }
+		.filter-chip { flex: 1; padding: 0 6px; }
+		.type-filter { width: 100%; justify-content: space-between; }
+		.type-filter select { flex: 1; max-width: none; }
+		.search-field { width: 100%; margin-left: 0; }
 		.search-field input { width: 100%; }
 		.search-field input { font-size: 16px; }
 		.file-change summary { grid-template-columns: minmax(0, 1fr) auto 16px; gap: 10px 8px; padding: 16px 12px; }

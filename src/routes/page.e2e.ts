@@ -120,10 +120,10 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByRole('link', { name: 'View source changes on GitHub' })).toHaveAttribute('href', /github.com/);
 	await expect(page.locator('pre')).toHaveCount(0);
 	await page.getByLabel('Search library changes').fill('no match');
-	await expect(page.getByText('No library changes match your search.')).toBeVisible();
-	await page.getByRole('button', { name: 'Clear search' }).click();
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.locator('.change-controls input')).toHaveCount(1);
-	await expect(page.locator('.change-controls select')).toHaveCount(0);
+	await expect(page.locator('.change-controls select')).toHaveCount(1);
 	await expect(fileSummary).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -275,6 +275,49 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 	const deprecationOnly = page.locator('summary').filter({ hasText: 'Deprecation-only architecture' });
 	await expect(deprecationOnly.locator('.file-status')).toHaveCount(1);
 	await expect(deprecationOnly.locator('.file-status')).toHaveAttribute('title', 'Deprecated');
+
+	for (const [status, titles] of [
+		['New', ['New policy']],
+		['Updated', ['Updated initiative']],
+		['Deprecated', ['Deprecated assignment', 'Deprecation-only architecture']],
+		['Removed', ['Removed archetype']]
+	] as const) {
+		const filter = page.getByRole('button', { name: status, exact: true });
+		await filter.click();
+		await expect(filter).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.locator('.file-path > strong')).toHaveText(titles);
+		await filter.click();
+	}
+	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await page.getByRole('button', { name: 'Removed', exact: true }).click();
+	await expect(page.locator('.file-path > strong')).toHaveText(['New policy', 'Removed archetype']);
+	await page.getByLabel('Filter by type').selectOption('initiative');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	await page.getByLabel('Filter by type').selectOption('initiative');
+	await expect(page.locator('.file-path > strong')).toHaveText(['Updated initiative']);
+	await page.getByLabel('Search library changes').fill('not found');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	const filterLayout = await page.evaluate(() => {
+		const bounds = (selector: string) => {
+			const { left, right, top, bottom } = document.querySelector(selector)!.getBoundingClientRect();
+			return { left, right, top, bottom };
+		};
+		return {
+			toolbar: bounds('.change-controls'),
+			type: bounds('.type-filter'),
+			search: bounds('.search-field'),
+			controlHeights: [...document.querySelectorAll('.filter-chip, .type-filter select, .search-field')]
+				.map((element) => element.getBoundingClientRect().height)
+		};
+	});
+	expect(filterLayout.search.right).toBeLessThanOrEqual(filterLayout.toolbar.right + 1);
+	expect(filterLayout.controlHeights.every((height) => height >= 44)).toBe(true);
+	if (page.viewportSize()!.width > 650) expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
+	else expect(filterLayout.search.top).toBeGreaterThan(filterLayout.type.bottom);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -437,7 +480,7 @@ test('renders details on demand and preserves keyboard disclosure across filters
 	await expect(page.getByText('Current library assignments')).toBeVisible();
 	await page.getByLabel('Search library changes').fill('no match');
 	await expect(page.locator('summary')).toHaveCount(0);
-	await page.getByRole('button', { name: 'Clear search' }).click();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.locator('.file-detail')).toHaveCount(1);
 	await first.focus();
 	await page.keyboard.press('Space');
