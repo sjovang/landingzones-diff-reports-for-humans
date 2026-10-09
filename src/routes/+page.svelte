@@ -445,8 +445,7 @@
 						<span><b class="removed-count">{report.totals.removed}</b> removed</span>
 					</div>
 					<p class="report-meta">
-						Generated <time datetime={report.generatedAt}>{new Date(report.generatedAt).toLocaleString()}</time> ·
-						<a href={report.from.url} target="_blank" rel="noreferrer">source tags</a>
+						Generated <time datetime={report.generatedAt}>{new Date(report.generatedAt).toLocaleString()}</time>
 					</p>
 				</div>
 				{#if !report.complete}
@@ -459,10 +458,7 @@
 				{/if}
 
 				<div class="changes-heading">
-					<div>
-						<h3>What changed</h3>
-						<span aria-live="polite" aria-atomic="true">{visibleChanges.length} of {report.changes.length} updates</span>
-					</div>
+					<h3>What changed</h3>
 					<nav class="change-controls" aria-label="Filter library changes">
 						<div class="filter-options">
 							<label class="status-filter">
@@ -746,7 +742,7 @@
 		text-decoration: none;
 	}
 	.repository-name { min-width: 0; }
-	.repository-link:hover, .report-meta a:hover { color: #145bc0; }
+	.repository-link:hover { color: #145bc0; }
 	.content { max-width: 1180px; margin: 0 auto; padding: 48px max(28px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left)); }
 	.intro {
 		text-align: center;
@@ -849,7 +845,7 @@
 	.error-notice strong { color: #713a33; }
 	.error-notice span { flex-basis: 100%; }
 	.error-notice .text-button { margin-left: auto; }
-	.report { margin-top: 48px; }
+	.report { margin-top: 24px; }
 	.report-heading {
 		display: flex;
 		align-items: center;
@@ -858,7 +854,6 @@
 		gap: 8px 24px;
 	}
 	.report-meta { color: #52647b; font-size: 12px; }
-	.report-meta a { display: inline-flex; min-height: 44px; align-items: center; color: #315e91; text-decoration: none; }
 	.coverage-warning { border-color: #dfc996; background: #fff8e8; color: #795515; }
 	.coverage-warning strong { color: #795515; }
 	.totals { display: flex; flex-wrap: wrap; gap: 14px; color: #596b80; font-size: 12px; white-space: nowrap; }
@@ -870,12 +865,10 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 20px;
-		padding: 24px 0 13px;
+		padding: 36px 0 13px;
 		border-bottom: 1px solid #cbd5e1;
 	}
-	.changes-heading > div:first-child { display: flex; align-items: baseline; gap: 11px; }
 	.changes-heading h3 { color: #20344c; font-size: 18px; letter-spacing: -0.02em; }
-	.changes-heading > div:first-child span { color: #52647b; font-size: 12px; }
 	.change-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 	.filter-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 	.status-filter, .type-filter { position: relative; display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #c5d0de; border-radius: 5px; background: #fff; color: #52647b; font-size: 13px; font-weight: 600; }
@@ -996,11 +989,10 @@
 		.direction { height: 20px; }
 		.direction svg { transform: rotate(90deg); }
 		.compare-button { grid-column: auto; width: 100%; margin-top: 8px; }
-		.report { margin-top: 36px; }
+		.report { margin-top: 24px; }
 		.report-heading { align-items: flex-start; flex-direction: column; }
 		.totals { gap: 13px; }
 		.changes-heading { align-items: start; gap: 12px; }
-		.changes-heading > div:first-child { justify-content: space-between; }
 		.change-controls { align-items: stretch; flex-direction: column; }
 		.filter-options { align-items: flex-start; flex-direction: column; }
 		.status-filter { width: 100%; }

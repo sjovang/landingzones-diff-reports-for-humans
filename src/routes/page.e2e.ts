@@ -100,13 +100,23 @@ test('explains policy versions, effects, and scopes with source links instead of
 
 	await page.getByRole('button', { name: /Compare releases/ }).click();
 	await expect(page.getByRole('heading', { name: '2025.10.0 to 2026.10.0' })).toBeVisible();
+	const reportGap = await page.evaluate(() => {
+		const pickerBottom = document.querySelector('.comparison-form')!.getBoundingClientRect().bottom;
+		const reportTop = document.querySelector('.report')!.getBoundingClientRect().top;
+		return reportTop - pickerBottom;
+	});
+	expect(reportGap).toBe(24);
 	await expect(page.locator('#report-title')).toHaveClass(/\bsr-only\b/);
 	await expect(page.locator('.coverage-warning')).toHaveCount(0);
 	await expect(page.locator('.summary-copy, .report-context')).toHaveCount(0);
 	await expect(page.getByLabel('Library change totals')).toBeVisible();
 	await expect(page.locator('.summary-strip')).toHaveCount(0);
 	await expect(page.locator('.report-heading .totals')).toHaveCount(1);
+	await expect(page.locator('.changes-heading [aria-live]')).toHaveCount(0);
+	await expect(page.locator('.report-meta a')).toHaveCount(0);
 	await expect(page.locator('.report-heading time')).toHaveAttribute('datetime', report.generatedAt);
+	await expect(page.locator('.report-meta')).toHaveText(/^Generated /);
+	await expect(page.locator('.changes-heading')).toHaveCSS('padding-top', '36px');
 	await expect(page.locator('.report-heading')).toHaveCSS('border-top-width', '0px');
 	await expect(page.locator('.report-heading')).toHaveCSS('border-bottom-width', '0px');
 	await expect(page.locator('footer')).toHaveCount(0);
@@ -310,7 +320,7 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		};
 		return {
 			heading: bounds('.changes-heading'),
-			headingText: bounds('.changes-heading > div:first-child'),
+			headingText: bounds('.changes-heading h3'),
 			toolbar: bounds('.change-controls'),
 			status: bounds('.status-filter'),
 			type: bounds('.type-filter'),
@@ -447,7 +457,7 @@ test('adapts reports across narrow, tablet, landscape, and wide viewports', asyn
 	for (const [width, height] of [[320, 700], [390, 844], [650, 900], [768, 1024], [844, 390], [1024, 768], [1920, 1080]]) {
 		await page.setViewportSize({ width, height });
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-		expect(await page.locator('.brand, .repository-link, .report-meta a, .search-field input, .source-links a')
+		expect(await page.locator('.brand, .repository-link, .search-field input, .source-links a')
 			.evaluateAll((elements) => elements.every((element) => element.getBoundingClientRect().height >= 44))).toBe(true);
 		if (width <= 650) {
 			const title = await page.locator('.file-path').boundingBox();
@@ -485,7 +495,7 @@ test('keeps long multilingual content usable with accessible controls and reduce
 			elements.every((element) => element.getBoundingClientRect().height >= 44))).toBe(true);
 	}
 	await page.getByLabel('Search library changes').fill('nonexistent');
-	await expect(page.locator('.changes-heading [aria-live]')).toHaveText('0 of 1 updates');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
 });
 
 test('renders details on demand and preserves keyboard disclosure across filters', async ({ page }) => {
