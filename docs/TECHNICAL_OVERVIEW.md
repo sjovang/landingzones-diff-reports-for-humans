@@ -1,6 +1,6 @@
 # Technical overview
 
-ALZ Release Brief compares published releases of the Azure Landing Zones
+Landing Zone Release Brief compares published releases of the Azure Landing Zones
 Library and produces deterministic reports for Azure Landing Zones (ALZ,
 `platform/alz/`) and Sovereign Landing Zone (SLZ, `platform/slz/`). It does not
 inspect Azure environments or certify that an upgrade is safe.
@@ -75,7 +75,7 @@ definitions remain explicitly unresolved.
 
 ## Change evaluation and display rules
 
-This is the current implemented behavior of ALZ Release Brief, not a proposed
+This is the current implemented behavior of Landing Zone Release Brief, not a proposed
 ideal model. Use the rule IDs below when discussing changes to classification,
 wording, visibility, and ordering. Report schema: **6**.
 

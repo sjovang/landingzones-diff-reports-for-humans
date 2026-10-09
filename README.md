@@ -1,6 +1,6 @@
-# ALZ Release Brief
+# Landing Zone Release Brief
 
-ALZ Release Brief compares published Azure Landing Zones Library releases and
+Landing Zone Release Brief compares published Azure Landing Zones Library releases and
 produces deterministic, human-readable reports for Azure Landing Zones (ALZ,
 `platform/alz/`) and Sovereign Landing Zone (SLZ, `platform/slz/`). Choose a
 library above the release pickers; comparisons always stay within that library,

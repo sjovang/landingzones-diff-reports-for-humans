@@ -70,8 +70,8 @@ test('explains policy versions, effects, and scopes with source links instead of
 
 	await page.goto('/');
 	await expect(page.getByRole('heading', { name: 'ALZ release changes, explained' })).toBeVisible();
-	await expect(page).toHaveTitle('ALZ Release Brief');
-	await expect(page.getByRole('link', { name: 'ALZ Release Brief home' })).toBeVisible();
+	await expect(page).toHaveTitle('ALZ | Landing Zone Release Brief');
+	await expect(page.getByRole('link', { name: 'Landing Zone Release Brief home' })).toBeVisible();
 	await expect.poll(() => page.locator('.brand-mark').evaluate((image) =>
 		image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
 	const upstreamLink = page.getByRole('link', { name: 'Azure Landing Zones Library', exact: true });
@@ -473,7 +473,8 @@ test('switches libraries, clears the report, and remembers separate pairs across
 	await expect(page.locator('.report')).toBeVisible();
 	await page.getByRole('radio', { name: 'SLZ', exact: true }).check();
 	await expect(page.locator('.report')).toHaveCount(0);
-	await expect(page).toHaveTitle('SLZ Release Brief');
+	await expect(page).toHaveTitle('SLZ | Landing Zone Release Brief');
+	await expect(page.getByRole('link', { name: 'Landing Zone Release Brief home' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'SLZ release changes, explained' })).toBeVisible();
 	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[1].tag);
 	expect(await page.locator('.release-picker option').evaluateAll((options) =>
