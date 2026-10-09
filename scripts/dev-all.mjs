@@ -6,6 +6,7 @@ import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { resolvePortConflicts } from './dev-ports.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const children = new Set();
@@ -182,8 +183,7 @@ try {
 	await run('Git prerequisite check', 'git', ['--version']);
 	await run('Azure Functions Core Tools prerequisite check (install v4 if missing)', 'func', ['--version']);
 	const ports = [10000, 10001, 10002, 7071, 5173];
-	const busy = (await Promise.all(ports.map(async (port) => await portIsOpen(port) ? port : null))).filter((port) => port !== null);
-	if (busy.length) throw new Error(`Ports ${busy.join(', ')} are already in use. Stop your existing local dev services before running dev:all; they will not be stopped automatically.`);
+	await resolvePortConflicts(ports, { signal: shutdown.signal });
 	await run('Functions build', process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.functions.json']);
 	service('Azurite', process.execPath, ['node_modules/azurite/dist/src/azurite.js', '--silent', '--location', '.azurite', '--skipApiVersionCheck']);
 	await waitForPorts('Azurite', [10000, 10001, 10002]);
