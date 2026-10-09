@@ -139,18 +139,17 @@ resource webApp 'Microsoft.Web/sites@2026-08-01' = {
   }
 }
 
-// Keep portal-managed registry credentials when provisioning again.
 resource webSettings 'Microsoft.Web/sites/config@2026-08-01' = {
   parent: webApp
   name: 'appsettings'
-  properties: union(list('${webApp.id}/config/appsettings', '2026-08-01').properties, {
+  properties: {
     AZURE_STORAGE_ACCOUNT_NAME: storage.name
     AZURE_CLIENT_ID: webIdentity.properties.clientId
     APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
     WEBSITES_PORT: '3000'
     WEBSITE_RUN_FROM_PACKAGE: '0'
     DOCKER_REGISTRY_SERVER_URL: 'https://ghcr.io'
-  })
+  }
 }
 
 resource functionApp 'Microsoft.Web/sites@2026-08-01' = {
@@ -180,11 +179,10 @@ resource functionApp 'Microsoft.Web/sites@2026-08-01' = {
   }
 }
 
-// Preserve optional portal-managed settings such as the GitHub discovery token.
 resource functionSettings 'Microsoft.Web/sites/config@2026-08-01' = {
   parent: functionApp
   name: 'appsettings'
-  properties: union(list('${functionApp.id}/config/appsettings', '2026-08-01').properties, {
+  properties: {
     FUNCTIONS_EXTENSION_VERSION: '~4'
     FUNCTIONS_WORKER_RUNTIME: 'node'
     AzureWebJobsFeatureFlags: 'EnableWorkerIndexing'
@@ -199,7 +197,7 @@ resource functionSettings 'Microsoft.Web/sites/config@2026-08-01' = {
     COMPARISON_QUEUE_NAME: 'report-jobs'
     RELEASE_SYNC_SCHEDULE: '0 0 * * * *'
     APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
-  })
+  }
 }
 
 resource webBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {

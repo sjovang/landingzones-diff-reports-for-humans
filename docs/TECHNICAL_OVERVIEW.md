@@ -16,9 +16,9 @@ inspect Azure environments or certify that an upgrade is safe.
 The hosted app and worker use managed identity through `DefaultAzureCredential`
 and identity-based Functions storage settings. Grant only the required
 data-plane roles. Local development uses Azurite and does not need cloud
-credentials. A server-side `GITHUB_TOKEN` is optional for a higher GitHub API
-rate limit and is used only during release discovery; it must never be exposed
-to the browser.
+credentials. Release refs are discovered through Git transport; snapshot
+metadata and files come from raw GitHub content, so a GitHub API token is not
+required.
 
 ## Release catalog and comparison data
 

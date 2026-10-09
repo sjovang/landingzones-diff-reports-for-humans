@@ -1,18 +1,19 @@
-import { execFile, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { AppError } from './errors.js';
 import { analyzeReleases, summarizeChanges, type ReleaseFiles } from './analysis.js';
 import { REPORT_SCHEMA_VERSION, type ComparisonReport, type ComparisonJobMessage, type ReleaseDependency } from '../types.js';
 import { libraryForTag, libraryScope, type Library } from '../libraries.js';
 import { loadReleaseSnapshot, saveReleaseSnapshot } from './storage.js';
 
-const execFileAsync = promisify(execFile);
 const REPOSITORY_URL = 'https://github.com/Azure/Azure-Landing-Zones-Library.git';
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const MAX_COMMAND_OUTPUT = 32 * 1024 * 1024;
+const MAX_SNAPSHOT_SIZE = 128 * 1024 * 1024;
+const SNAPSHOT_FETCH_CONCURRENCY = 16;
 
 interface Release {
 	tag: string;
@@ -22,113 +23,75 @@ interface Release {
 	dependency?: ReleaseDependency;
 }
 
-async function git(directory: string, args: string[]) {
-	try {
-		const result = await execFileAsync(
-			process.env.GIT_EXECUTABLE ?? 'git',
-			['-C', directory, ...args],
-			{ encoding: 'utf8', maxBuffer: MAX_COMMAND_OUTPUT, timeout: 120_000 }
-		);
-		return result.stdout;
-	} catch (error) {
-		const cause = error instanceof Error ? error.message : 'Unknown Git process error';
-		if (cause.includes('ENOENT')) {
-			throw new AppError('The report worker requires Git to retrieve a complete, path-scoped diff.', 503);
-		}
-		console.error('Git could not produce a complete library release diff.', error);
-		throw new AppError('The report worker could not retrieve a complete library release diff. Try again later.', 502);
-	}
-}
-
-async function releaseTree(directory: string, sha: string, library: Library): Promise<Map<string, string>> {
+async function releaseTree(directory: string, treeOid: string, library: Library, path = ''): Promise<Map<string, string>> {
 	const prefix = libraryScope(library);
-	const output = await git(directory, ['ls-tree', '-r', '-z', sha, '--', prefix]);
-	const paths = new Map<string, string>();
-	for (const entry of output.split('\0').filter(Boolean)) {
-		const match = /^\d+ blob ([0-9a-f]{40})\t([\s\S]+)$/.exec(entry);
-		if (!match || !match[2].startsWith(prefix)) {
-			throw new AppError('The release contains an unsupported source entry.', 502);
+	const { tree } = await git.readTree({ fs, dir: directory, oid: treeOid });
+	const files = new Map<string, string>();
+	for (const entry of tree) {
+		const entryPath = path ? `${path}/${entry.path}` : entry.path;
+		if (entry.type === 'tree') {
+			if (prefix.startsWith(`${entryPath}/`) || entryPath.startsWith(prefix)) {
+				for (const [filePath, oid] of await releaseTree(directory, entry.oid, library, entryPath)) {
+					files.set(filePath, oid);
+				}
+			}
+		} else if (entryPath.startsWith(prefix)) {
+			if (entry.type !== 'blob') throw new AppError('The release contains an unsupported source entry.', 502);
+			files.set(entryPath, entry.oid);
 		}
-		paths.set(match[2], match[1]);
 	}
-	return paths;
+	return files;
 }
 
-async function readBlobs(directory: string, ids: string[]): Promise<Map<string, string>> {
-	const output = await new Promise<Buffer>((resolve, reject) => {
-		const child = spawn(process.env.GIT_EXECUTABLE ?? 'git', ['-C', directory, 'cat-file', '--batch']);
-		const chunks: Buffer[] = [];
-		let bytes = 0;
-		let stderr = '';
-		const timer = setTimeout(() => {
-			child.kill();
-			reject(new AppError('Reading release policy context timed out. Try again later.', 502));
-		}, 120_000);
-		child.stdout.on('data', (chunk: Buffer) => {
-			bytes += chunk.length;
-			if (bytes > 128 * 1024 * 1024) {
-				child.kill();
-				reject(new AppError('The release exceeds the supported policy-context size.', 502));
-			} else chunks.push(chunk);
-		});
-		child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-		child.on('error', (error) => { clearTimeout(timer); reject(error); });
-		child.stdin.on('error', (error) => { clearTimeout(timer); reject(error); });
-		child.on('close', (code) => {
-			clearTimeout(timer);
-			if (code !== 0) {
-				console.error('Git could not read release policy context.', { code, stderr });
-				reject(new AppError('The report worker could not read the full release policy context.', 502));
-			} else resolve(Buffer.concat(chunks));
-		});
-		child.stdin.end(`${ids.join('\n')}\n`);
-	});
-	const blobs = new Map<string, string>();
-	let offset = 0;
-	for (const id of ids) {
-		const end = output.indexOf(10, offset);
-		const header = output.subarray(offset, end).toString();
-		const match = /^([0-9a-f]{40}) blob (\d+)$/.exec(header);
-		if (end < 0 || !match || match[1] !== id) {
-			throw new AppError('Git returned incomplete release policy context.', 502);
-		}
-		const length = Number(match[2]);
-		offset = end + 1;
-		if (offset + length >= output.length || output[offset + length] !== 10) {
-			throw new AppError('Git returned incomplete release file contents.', 502);
-		}
-		blobs.set(id, output.subarray(offset, offset + length).toString('utf8'));
-		offset += length + 1;
-	}
-	return blobs;
-}
-
-function snapshot(tree: Map<string, string>, blobs: Map<string, string>): ReleaseFiles {
-	return new Map([...tree].map(([path, id]) => {
-		const content = blobs.get(id);
-		if (content === undefined) throw new AppError(`Missing release context for ${path}.`, 502);
-		return [path, content];
-	}));
-}
-
-async function fetchReleaseSnapshot(sha: string, library: Library): Promise<ReleaseFiles> {
+async function fetchReleaseSnapshot(sha: string, tag: string, library: Library): Promise<ReleaseFiles> {
 	const directory = await mkdtemp(join(tmpdir(), 'alz-release-diff-'));
 	try {
-		await git(directory, ['init', '--quiet']);
-		await git(directory, ['remote', 'add', 'origin', REPOSITORY_URL]);
-		await git(directory, [
-			'fetch',
-			'--quiet',
-			'--depth=1',
-			'origin',
-			sha
-		]);
-		const fetched = (await git(directory, ['rev-parse', 'FETCH_HEAD^{commit}'])).trim().toLowerCase();
-		if (fetched !== sha) throw new AppError('The upstream release snapshot does not match the synchronized commit.', 502);
-		const tree = await releaseTree(directory, sha, library);
+		await git.init({ fs, dir: directory });
+		await git.addRemote({
+			fs,
+			dir: directory,
+			remote: 'origin',
+			url: REPOSITORY_URL
+		});
+		const result = await git.fetch({
+			fs,
+			http,
+			dir: directory,
+			remote: 'origin',
+			ref: `refs/tags/${tag}`,
+			remoteRef: `refs/tags/${tag}`,
+			depth: 1,
+			singleBranch: true,
+			tags: false
+		});
+		const fetchedSha = result.fetchHead?.toLowerCase();
+		if (fetchedSha !== sha) throw new AppError('The upstream release snapshot does not match the synchronized commit.', 502);
+		const { commit } = await git.readCommit({ fs, dir: directory, oid: fetchedSha });
+		const tree = await releaseTree(directory, commit.tree, library);
 		if (!tree.size) throw new AppError(`The synchronized commit contains no ${library.toUpperCase()} source files.`, 502);
-		const blobs = await readBlobs(directory, [...new Set(tree.values())]);
-		return snapshot(tree, blobs);
+
+		const snapshot: ReleaseFiles = new Map();
+		let totalSize = 0;
+		const entries = [...tree];
+		for (let offset = 0; offset < entries.length; offset += SNAPSHOT_FETCH_CONCURRENCY) {
+			const batch = entries.slice(offset, offset + SNAPSHOT_FETCH_CONCURRENCY);
+			const contents = await Promise.all(batch.map(async ([path, oid]) => {
+				const result = await git.readBlob({ fs, dir: directory, oid });
+				return [path, Buffer.from(result.blob)] as const;
+			}));
+			for (const [path, content] of contents) {
+				totalSize += content.length;
+				if (totalSize > MAX_SNAPSHOT_SIZE) {
+					throw new AppError('The release exceeds the supported policy-context size.', 502);
+				}
+				snapshot.set(path, content.toString('utf8'));
+			}
+		}
+		return snapshot;
+	} catch (error) {
+		if (error instanceof AppError) throw error;
+		console.error('Git could not produce a complete, path-scoped release snapshot.', error);
+		throw new AppError('The report worker could not retrieve a complete library release snapshot. Try again later.', 502);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
@@ -147,7 +110,7 @@ export async function getReleaseSnapshot(release: Pick<Release, 'sha' | 'tag'>):
 	const request = (async () => {
 		const stored = await loadReleaseSnapshot(sha, library);
 		if (stored) return stored;
-		const files = await fetchReleaseSnapshot(sha, library);
+		const files = await fetchReleaseSnapshot(sha, release.tag, library);
 		await saveReleaseSnapshot(sha, files, library);
 		return files;
 	})();
