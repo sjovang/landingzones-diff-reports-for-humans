@@ -176,66 +176,30 @@ resource functionApp 'Microsoft.Web/sites@2026-08-01' = {
       http20Enabled: true
       linuxFxVersion: 'Node|22'
       minTlsVersion: '1.2'
-      appSettings: [
-        {
-          name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'node'
-        }
-        {
-          name: 'AzureWebJobsFeatureFlags'
-          value: 'EnableWorkerIndexing'
-        }
-        {
-          name: 'WEBSITE_RUN_FROM_PACKAGE'
-          value: '1'
-        }
-        {
-          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'false'
-        }
-        {
-          name: 'WEBSITE_NODE_DEFAULT_VERSION'
-          value: '~22'
-        }
-        {
-          name: 'AzureWebJobsStorage__accountName'
-          value: storage.name
-        }
-        {
-          name: 'AzureWebJobsStorage__credential'
-          value: 'managedidentity'
-        }
-        {
-          name: 'AzureWebJobsStorage__clientId'
-          value: functionIdentity.properties.clientId
-        }
-        {
-          name: 'AZURE_STORAGE_ACCOUNT_NAME'
-          value: storage.name
-        }
-        {
-          name: 'AZURE_CLIENT_ID'
-          value: functionIdentity.properties.clientId
-        }
-        {
-          name: 'COMPARISON_QUEUE_NAME'
-          value: 'report-jobs'
-        }
-        {
-          name: 'RELEASE_SYNC_SCHEDULE'
-          value: '0 0 * * * *'
-        }
-        {
-          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-          value: appInsights.properties.ConnectionString
-        }
-      ]
     }
   }
+}
+
+// Preserve optional portal-managed settings such as the GitHub discovery token.
+resource functionSettings 'Microsoft.Web/sites/config@2026-08-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: union(list('${functionApp.id}/config/appsettings', '2026-08-01').properties, {
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    FUNCTIONS_WORKER_RUNTIME: 'node'
+    AzureWebJobsFeatureFlags: 'EnableWorkerIndexing'
+    WEBSITE_RUN_FROM_PACKAGE: '1'
+    SCM_DO_BUILD_DURING_DEPLOYMENT: 'false'
+    WEBSITE_NODE_DEFAULT_VERSION: '~22'
+    AzureWebJobsStorage__accountName: storage.name
+    AzureWebJobsStorage__credential: 'managedidentity'
+    AzureWebJobsStorage__clientId: functionIdentity.properties.clientId
+    AZURE_STORAGE_ACCOUNT_NAME: storage.name
+    AZURE_CLIENT_ID: functionIdentity.properties.clientId
+    COMPARISON_QUEUE_NAME: 'report-jobs'
+    RELEASE_SYNC_SCHEDULE: '0 0 * * * *'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
+  })
 }
 
 resource webBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {

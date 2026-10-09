@@ -135,6 +135,8 @@ The web app URL is printed by `azd` and is also available in the Azure portal.
 The first scheduled release sync runs hourly. An optional `GITHUB_TOKEN`
 application setting on the Function App increases the upstream GitHub API rate
 limit; configure it in Azure if needed and keep it out of source control.
+Bicep preserves optional portal-managed Function App settings, including this
+token, on subsequent provisioning runs.
 
 After first-time setup, `azd up` can provision and deploy both services in one
 step, provided `WEB_IMAGE` points to an image that exists and the GHCR pull
