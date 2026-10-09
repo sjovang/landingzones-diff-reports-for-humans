@@ -420,11 +420,11 @@
 		</a>
 		<a
 			class="repository-link"
-			href="https://github.com/sjovang/alzlib-diff-for-humans"
+			href="https://github.com/sjovang/landingzones-diff-reports-for-humans"
 			target="_blank"
 			rel="noreferrer"
 		>
-			<span class="repository-name">sjovang / alzlib-diff-for-humans</span>
+			<span class="repository-name">sjovang / landingzones-diff-reports-for-humans</span>
 			<span aria-hidden="true">↗</span>
 		</a>
 	</header>
