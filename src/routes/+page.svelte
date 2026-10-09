@@ -866,15 +866,17 @@
 	.added-count { color: #187348 !important; }
 	.removed-count { color: #b44347 !important; }
 	.changes-heading {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 14px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
 		padding: 24px 0 13px;
+		border-bottom: 1px solid #cbd5e1;
 	}
 	.changes-heading > div:first-child { display: flex; align-items: baseline; gap: 11px; }
 	.changes-heading h3 { color: #20344c; font-size: 18px; letter-spacing: -0.02em; }
 	.changes-heading > div:first-child span { color: #52647b; font-size: 12px; }
-	.change-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; padding-bottom: 12px; border-bottom: 1px solid #cbd5e1; }
+	.change-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
 	.filter-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 	.status-filter, .type-filter { position: relative; display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #c5d0de; border-radius: 5px; background: #fff; color: #52647b; font-size: 13px; font-weight: 600; }
 	.status-filter:focus-within, .type-filter:focus-within { border-color: #3181dc; box-shadow: 0 0 0 2px #d8eaff; }
@@ -977,6 +979,8 @@
 		.compare-button { grid-column: 1 / -1; justify-self: end; }
 		.comparison-form .compare-button { align-self: center; }
 		.file-change summary { grid-template-columns: 48px minmax(0, 1fr) 100px 20px; }
+		.changes-heading { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+		.change-controls { justify-content: flex-start; width: 100%; padding-bottom: 12px; border-bottom: 0; }
 		.search-field { flex: 0 1 263px; }
 		.search-field input { width: 100%; }
 	}
@@ -995,7 +999,7 @@
 		.report { margin-top: 36px; }
 		.report-heading { align-items: flex-start; flex-direction: column; }
 		.totals { gap: 13px; }
-		.changes-heading { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: start; gap: 12px; }
+		.changes-heading { align-items: start; gap: 12px; }
 		.changes-heading > div:first-child { justify-content: space-between; }
 		.change-controls { align-items: stretch; flex-direction: column; }
 		.filter-options { align-items: flex-start; flex-direction: column; }

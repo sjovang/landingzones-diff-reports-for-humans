@@ -309,6 +309,8 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 			return { left, right, top, bottom };
 		};
 		return {
+			heading: bounds('.changes-heading'),
+			headingText: bounds('.changes-heading > div:first-child'),
 			toolbar: bounds('.change-controls'),
 			status: bounds('.status-filter'),
 			type: bounds('.type-filter'),
@@ -329,8 +331,18 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		expect(fieldStyle.borderTopLeftRadius).toBe(filterLayout.searchStyle.borderTopLeftRadius);
 		expect(fieldStyle.backgroundColor).toBe(filterLayout.searchStyle.backgroundColor);
 	}
-	if (page.viewportSize()!.width > 650) expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
-	else expect(filterLayout.search.top).toBeGreaterThan(filterLayout.type.bottom);
+	if (page.viewportSize()!.width > 900) {
+		expect(filterLayout.headingText.left).toBe(filterLayout.heading.left);
+		expect(filterLayout.headingText.right).toBeLessThan(filterLayout.toolbar.left);
+		expect(Math.abs(filterLayout.headingText.top + filterLayout.headingText.bottom - filterLayout.toolbar.top - filterLayout.toolbar.bottom)).toBeLessThanOrEqual(20);
+		expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
+	} else if (page.viewportSize()!.width > 650) {
+		expect(filterLayout.toolbar.top).toBeGreaterThan(filterLayout.headingText.bottom);
+		expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
+	} else {
+		expect(filterLayout.toolbar.top).toBeGreaterThan(filterLayout.headingText.bottom);
+		expect(filterLayout.search.top).toBeGreaterThan(filterLayout.type.bottom);
+	}
 	await page.getByLabel('Filter by status').focus();
 	await expect(page.locator('.status-filter')).toHaveCSS('border-top-color', 'rgb(49, 129, 220)');
 	await page.getByLabel('Filter by type').focus();
