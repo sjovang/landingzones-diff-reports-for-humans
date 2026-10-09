@@ -33,7 +33,7 @@
 
 	const kindLabels: Record<string, string> = {
 		policy: 'Policy definition', initiative: 'Policy initiative', assignment: 'Policy assignment',
-		archetype: 'Archetype', architecture: 'Architecture', role: 'Role definition',
+		archetype: 'Archetype definition', architecture: 'Architecture definition', role: 'Role definition',
 		configuration: 'Library configuration', documentation: 'Documentation'
 	};
 
@@ -58,6 +58,11 @@
 	const searchQuery = $derived(search.toLowerCase());
 	const visibleChanges = $derived(
 		searchableChanges.filter(({ text }) => text.includes(searchQuery)).map(({ change }) => change)
+			.sort((a, b) => {
+				const order = (change: typeof a) => change.status === 'added' ? 0
+					: change.status === 'removed' ? 1 : change.deprecated ? 2 : 3;
+				return order(a) - order(b);
+			})
 	);
 
 	onMount(() => {
@@ -473,7 +478,10 @@
 								</span>
 								<span class="file-path">
 									<strong>{change.title}</strong>
-									<small>{kindLabels[change.kind]} · {change.summary}</small>
+									<span class="file-meta">
+										<span class="change-kind">{kindLabels[change.kind]}</span>
+										<small>{change.summary}</small>
+									</span>
 								</span>
 								<span class="version-change" class:version-updated={Boolean(change.beforeVersion && change.afterVersion && change.beforeVersion !== change.afterVersion)}>
 									{#if change.beforeVersion && change.afterVersion && change.beforeVersion !== change.afterVersion}
@@ -487,11 +495,18 @@
 								</svg>
 							</summary>
 							{#if expandedChanges[change.id]}
+							{@const assignmentDeltas = assignmentChanges(change.assignmentsBefore, change.assignmentsAfter)}
+							{@const referenceOnlyAssignmentChange = assignmentDeltas.length > 0 && assignmentDeltas.every((assignment) =>
+								assignment.changes.length === 1 && assignment.changes[0].label === 'Referenced definition')}
+							{@const assignmentSections = [
+								{ label: 'Previous affected assignments', assignments: changedAssignments(change.assignmentsBefore, change.assignmentsAfter), show: change.status !== 'added' && assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) },
+								{ label: change.status === 'added' ? 'Library assignments' : 'Current library assignments', assignments: assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) ? changedAssignments(change.assignmentsAfter, change.assignmentsBefore) : change.assignmentsAfter, show: change.status !== 'removed' }
+							]}
 							<div class="file-detail">
 								<p class="change-outcome">{change.summary}</p>
-								{#each assignmentChanges(change.assignmentsBefore, change.assignmentsAfter) as assignment}
+								{#each assignmentDeltas as assignment}
 									<div class="detail-group assignment-delta">
-										<h4>Assignment change: {assignment.name}</h4>
+										<h4>{referenceOnlyAssignmentChange ? 'Assignment reference' : `Assignment change: ${assignment.name}`}</h4>
 										<dl class="delta-list">
 											{#each assignment.changes as delta}
 												<div>
@@ -502,12 +517,12 @@
 											{/each}
 										</dl>
 										{#if assignment.unchanged.length}
-											<p class="unchanged-context">Unchanged: {assignment.unchanged.join(', ')}.</p>
+											<p class="unchanged-context">{referenceOnlyAssignmentChange ? 'Assignment settings are unchanged.' : `Unchanged: ${assignment.unchanged.join(', ')}.`}</p>
 										{/if}
 									</div>
 								{/each}
-								{#if change.description}<p class="change-summary">{change.description}</p>{/if}
-								{#if change.facts.length}
+								{#if !referenceOnlyAssignmentChange && change.description}<p class="change-summary">{change.description}</p>{/if}
+								{#if !referenceOnlyAssignmentChange && change.facts.length}
 									<div class="detail-group">
 										<h4>Change explained</h4>
 										<ul class="fact-list">
@@ -517,35 +532,71 @@
 										</ul>
 									</div>
 								{/if}
-								{#each [
-									{ label: 'Previous affected assignments', assignments: changedAssignments(change.assignmentsBefore, change.assignmentsAfter), show: change.status !== 'added' && assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) },
-									{ label: change.status === 'added' ? 'Library assignments' : 'Current library assignments', assignments: assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) ? changedAssignments(change.assignmentsAfter, change.assignmentsBefore) : change.assignmentsAfter, show: change.status !== 'removed' }
-								] as section}
-									{#if section.show && section.assignments.length}
-										<div class="detail-group assignment-context">
-											<h4>{section.label}</h4>
-											{#each section.assignments as assignment}
-												<div class="assignment-row">
-													<strong>{assignment.name}</strong>
-													<p>References: {assignment.definition}</p>
-													<p>{assignment.effect}</p>
-													<p>{assignment.enforcement}</p>
-													<ul class="fact-list">
-														{#each assignment.scopes as scope}<li>{scope}</li>{/each}
-														{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
-														{#each assignment.notes as note}<li>{note}</li>{/each}
-													</ul>
-													<div class="source-links">
-														{#each assignment.sources as source}
-															<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
-														{/each}
-													</div>
+								{#if referenceOnlyAssignmentChange}
+									<details class="assignment-evidence">
+										<summary>Show full assignment context</summary>
+										{#each assignmentSections as section}
+											{#if section.show && section.assignments.length}
+												<div class="detail-group assignment-context">
+													<h4>{section.label}</h4>
+													{#each section.assignments as assignment}
+														<div class="assignment-row">
+															<strong>{assignment.name}</strong>
+															<p>References: {assignment.definition}</p>
+															<p>{assignment.effect}</p>
+															<p>{assignment.enforcement}</p>
+															<ul class="fact-list">
+																{#each assignment.scopes as scope}<li>{scope}</li>{/each}
+																{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
+																{#each assignment.notes as note}<li>{note}</li>{/each}
+															</ul>
+															<div class="source-links">
+																{#each assignment.sources as source}
+																	<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
+																{/each}
+															</div>
+														</div>
+													{/each}
 												</div>
-											{/each}
-										</div>
-									{/if}
-								{/each}
-								{#if change.warnings.length}
+											{/if}
+										{/each}
+										{#if change.warnings.length}
+											<div class="detail-group review-notes">
+												<h4>Interpretation notes</h4>
+												<ul class="fact-list">
+													{#each change.warnings as warning}<li>{warning}</li>{/each}
+												</ul>
+											</div>
+										{/if}
+									</details>
+								{:else}
+									{#each assignmentSections as section}
+										{#if section.show && section.assignments.length}
+											<div class="detail-group assignment-context">
+												<h4>{section.label}</h4>
+												{#each section.assignments as assignment}
+													<div class="assignment-row">
+														<strong>{assignment.name}</strong>
+														<p>References: {assignment.definition}</p>
+														<p>{assignment.effect}</p>
+														<p>{assignment.enforcement}</p>
+														<ul class="fact-list">
+															{#each assignment.scopes as scope}<li>{scope}</li>{/each}
+															{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
+															{#each assignment.notes as note}<li>{note}</li>{/each}
+														</ul>
+														<div class="source-links">
+															{#each assignment.sources as source}
+																<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
+															{/each}
+														</div>
+													</div>
+												{/each}
+											</div>
+											{/if}
+										{/each}
+								{/if}
+								{#if !referenceOnlyAssignmentChange && change.warnings.length}
 									<div class="detail-group review-notes">
 										<h4>Interpretation notes</h4>
 										<ul class="fact-list">
@@ -812,6 +863,8 @@
 	.status-deprecated { color: #b45309; }
 	.file-path { display: grid; min-width: 0; gap: 3px; }
 	.file-path > strong { color: #234c7e; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+	.file-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+	.change-kind { display: inline-flex; width: fit-content; align-items: center; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f4f7fb; color: #192639; font-size: 12px; font-weight: 650; line-height: 1.3; }
 	.file-path small { color: #52647b; font-size: 12px; overflow-wrap: anywhere; }
 	.version-change { color: #314e6d; font-size: 12px; text-align: right; overflow-wrap: anywhere; }
 	.version-updated { color: #192639; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -824,6 +877,8 @@
 	.delta-list dd { margin: 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; overflow-wrap: anywhere; }
 	.delta-label { color: #52647b; }
 	.unchanged-context { margin-top: 8px; color: #52647b; font-size: 13px; }
+	.assignment-evidence { margin-top: 14px; }
+	.assignment-evidence > summary { min-height: 44px; width: fit-content; display: flex; align-items: center; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 	.change-summary { padding: 5px 0 13px; color: #4d6077; font-size: 13px; overflow-wrap: anywhere; }
 	.detail-group { margin-top: 14px; }
 	.detail-group h4 { margin-bottom: 8px; color: #314e6d; font-size: 13px; font-weight: 700; }

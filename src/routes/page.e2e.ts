@@ -196,7 +196,7 @@ test('shows an initiative replacement separately from unchanged policy settings'
 	const assignment = report.changes[0].assignmentsAfter[0];
 	const before = { ...assignment, definition: 'Network guardrails (Network_20250326, version 2.0.0)', definitionId: 'Network_20250326', definitionVersion: '2.0.0' };
 	const after = { ...before, definition: 'Network guardrails (Network_20260714, version 2.1.0)', definitionId: 'Network_20260714', definitionVersion: '2.1.0' };
-	const summary = 'Assignment now uses Network guardrails, version 2.1.0. The policy definition is unchanged.';
+	const summary = 'Assignment now references Network guardrails, version 2.1.0. Policy rules and assignment settings are unchanged.';
 	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases } }));
 	await page.route('**/api/comparisons', (route) => route.fulfill({ json: {
 		status: 'completed', report: { ...report, changes: [{
@@ -212,17 +212,24 @@ test('shows an initiative replacement separately from unchanged policy settings'
 	await expect(page.locator('.assignment-delta dt')).toHaveText('Referenced definition');
 	await expect(page.locator('.assignment-delta dd').nth(0)).toContainText('Network_20250326, version 2.0.0');
 	await expect(page.locator('.assignment-delta dd').nth(1)).toContainText('Network_20260714, version 2.1.0');
-	await expect(page.locator('.unchanged-context')).toHaveText('Unchanged: effect, enforcement, scopes, parameters and version selections.');
+	await expect(page.locator('.unchanged-context')).toHaveText('Assignment settings are unchanged.');
+	await expect(page.locator('.change-summary')).toHaveCount(0);
+	await expect(page.locator('.assignment-context').first()).toBeHidden();
+	await expect(page.locator('.review-notes')).toBeHidden();
+	await page.getByText('Show full assignment context').click();
+	await expect(page.locator('.assignment-context')).toHaveCount(2);
+	await expect(page.locator('.assignment-context').first()).toBeVisible();
+	await expect(page.locator('.review-notes')).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('distinguishes added, updated, removed, and deprecated items with accessible icon-only statuses', async ({ page }) => {
 	const changes = [
 		{ ...report.changes[0], id: 'new', title: 'New policy', status: 'added', beforeVersion: undefined },
-		{ ...report.changes[0], id: 'updated', title: 'Updated policy', status: 'modified' },
-		{ ...report.changes[0], id: 'removed', title: 'Removed policy', status: 'removed' },
-		{ ...report.changes[0], id: 'deprecated', title: 'Deprecated policy', status: 'modified', deprecated: true },
-		{ ...report.changes[0], id: 'deprecation-only', title: 'Deprecation-only policy', status: 'modified',
+		{ ...report.changes[0], id: 'updated', title: 'Updated initiative', kind: 'initiative', status: 'modified' },
+		{ ...report.changes[0], id: 'removed', title: 'Removed archetype', kind: 'archetype', status: 'removed' },
+		{ ...report.changes[0], id: 'deprecated', title: 'Deprecated assignment', kind: 'assignment', status: 'modified', deprecated: true },
+		{ ...report.changes[0], id: 'deprecation-only', title: 'Deprecation-only architecture', kind: 'architecture', status: 'modified',
 			deprecated: true, deprecationOnly: true, beforeVersion: '1.1.0', afterVersion: '1.1.0-deprecated' }
 	];
 	await page.route('**/api/releases', (route) => route.fulfill({ status: 200, json: { releases } }));
@@ -231,11 +238,17 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 	}));
 	await page.goto('/');
 	await page.getByRole('button', { name: /Compare releases/ }).click();
+	await expect(page.locator('.file-path > strong')).toHaveText([
+		'New policy', 'Removed archetype', 'Deprecated assignment', 'Deprecation-only architecture', 'Updated initiative'
+	]);
+	await expect(page.locator('.change-kind')).toHaveText([
+		'Policy definition', 'Archetype definition', 'Policy assignment', 'Architecture definition', 'Policy initiative'
+	]);
 	for (const [title, label, color] of [
 		['New policy', 'Added', 'rgb(37, 112, 72)'],
-		['Updated policy', 'Updated', 'rgb(23, 91, 169)'],
-		['Removed policy', 'Removed', 'rgb(161, 60, 64)'],
-		['Deprecated policy', 'Deprecated', 'rgb(180, 83, 9)']
+		['Updated initiative', 'Updated', 'rgb(23, 91, 169)'],
+		['Removed archetype', 'Removed', 'rgb(161, 60, 64)'],
+		['Deprecated assignment', 'Deprecated', 'rgb(180, 83, 9)']
 	]) {
 		const summary = page.locator('summary').filter({ hasText: title });
 		const badge = summary.locator('.file-status').filter({ hasText: label });
@@ -249,7 +262,7 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		await expect(badge.locator('svg[aria-hidden="true"]')).toHaveCount(1);
 		await expect(badge.locator('svg')).toHaveCSS('width', '20px');
 	}
-	const deprecated = page.locator('summary').filter({ hasText: 'Deprecated policy' });
+	const deprecated = page.locator('summary').filter({ hasText: 'Deprecated assignment' });
 	await expect(page.locator('summary').filter({ hasText: 'New policy' }).locator('.version-change')).not.toHaveClass(/version-updated/);
 	await expect(deprecated.locator('.file-status')).toHaveCount(2);
 	const icons = await deprecated.locator('.file-status').evaluateAll((elements) =>
@@ -259,7 +272,7 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		}));
 	expect(icons[0].top).toBe(icons[1].top);
 	expect(icons[1].left).toBeGreaterThan(icons[0].right);
-	const deprecationOnly = page.locator('summary').filter({ hasText: 'Deprecation-only policy' });
+	const deprecationOnly = page.locator('summary').filter({ hasText: 'Deprecation-only architecture' });
 	await expect(deprecationOnly.locator('.file-status')).toHaveCount(1);
 	await expect(deprecationOnly.locator('.file-status')).toHaveAttribute('title', 'Deprecated');
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
