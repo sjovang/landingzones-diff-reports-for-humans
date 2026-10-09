@@ -4,7 +4,9 @@
 	import { page } from '$app/state';
 	import brandIcon from '#lib/assets/favicon.svg';
 	import { assignmentChanges } from '../lib/assignment-changes.js';
-	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type AlzRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext } from '../lib/types.js';
+	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type AlzRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext, type ReleaseChange } from '../lib/types.js';
+
+	type ChangeFilter = 'added' | 'modified' | 'deprecated' | 'removed';
 
 	function assignmentFacts(assignments: PolicyAssignmentContext[]) {
 		return JSON.stringify(assignments.map(assignmentContextFacts));
@@ -25,6 +27,8 @@
 	let jobStatus = $state<ComparisonStatus | null>(null);
 	let pageError = $state('');
 	let search = $state('');
+	let statusFilter = $state<ChangeFilter | ''>('');
+	let kindFilter = $state('');
 	let announcement = $state('');
 	const lifecycle = new AbortController();
 	let disposed = false;
@@ -33,7 +37,7 @@
 
 	const kindLabels: Record<string, string> = {
 		policy: 'Policy definition', initiative: 'Policy initiative', assignment: 'Policy assignment',
-		archetype: 'Archetype', architecture: 'Architecture', role: 'Role definition',
+		archetype: 'Archetype definition', architecture: 'Architecture definition', role: 'Role definition',
 		configuration: 'Library configuration', documentation: 'Documentation'
 	};
 
@@ -42,6 +46,12 @@
 		modified: 'Updated',
 		removed: 'Removed'
 	};
+	const statusFilters: { value: ChangeFilter; label: string }[] = [
+		{ value: 'added', label: 'New' },
+		{ value: 'modified', label: 'Updated' },
+		{ value: 'deprecated', label: 'Deprecated' },
+		{ value: 'removed', label: 'Removed' }
+	];
 	const statusIcons: Record<string, string> = {
 		added: 'M8 3v10M3 8h10',
 		modified: 'M12.5 6A5 5 0 0 0 3 5M3 1.5V5h3.5M3.5 10A5 5 0 0 0 13 11m0 3.5V11H9.5',
@@ -56,9 +66,28 @@
 		}))
 	);
 	const searchQuery = $derived(search.toLowerCase());
+	function matchesStatus(change: ReleaseChange) {
+		if (!statusFilter) return true;
+		if (statusFilter === 'deprecated') return Boolean(change.deprecated);
+		if (statusFilter === 'modified') return change.status === 'modified' && !change.deprecated;
+		return change.status === statusFilter;
+	}
 	const visibleChanges = $derived(
-		searchableChanges.filter(({ text }) => text.includes(searchQuery)).map(({ change }) => change)
+		searchableChanges.filter(({ change, text }) =>
+			matchesStatus(change) && (!kindFilter || change.kind === kindFilter) && text.includes(searchQuery))
+			.map(({ change }) => change)
+			.sort((a, b) => {
+				const order = (change: typeof a) => change.status === 'added' ? 0
+					: change.status === 'removed' ? 1 : change.deprecated ? 2 : 3;
+				return order(a) - order(b);
+			})
 	);
+
+	function clearFilters() {
+		search = '';
+		statusFilter = '';
+		kindFilter = '';
+	}
 
 	onMount(() => {
 		const params = new URL(window.location.href).searchParams;
@@ -201,7 +230,7 @@
 		jobStatus = null;
 		pageError = '';
 		announcement = '';
-		search = '';
+		clearFilters();
 
 		try {
 			const url = new URL(window.location.href);
@@ -310,7 +339,7 @@
 			<div>
 				<h1 id="page-title" tabindex="-1">ALZ release changes, explained</h1>
 				<p>
-					Compare two Azure Landing Zones Library releases. This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
+					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases. This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
 				</p>
 			</div>
 		</section>
@@ -416,8 +445,7 @@
 						<span><b class="removed-count">{report.totals.removed}</b> removed</span>
 					</div>
 					<p class="report-meta">
-						Generated <time datetime={report.generatedAt}>{new Date(report.generatedAt).toLocaleString()}</time> ·
-						<a href={report.from.url} target="_blank" rel="noreferrer">source tags</a>
+						Generated <time datetime={report.generatedAt}>{new Date(report.generatedAt).toLocaleString()}</time>
 					</p>
 				</div>
 				{#if !report.complete}
@@ -430,11 +458,30 @@
 				{/if}
 
 				<div class="changes-heading">
-					<div>
-						<h3>What changed</h3>
-						<span aria-live="polite" aria-atomic="true">{visibleChanges.length} of {report.changes.length} updates</span>
-					</div>
-					<div class="change-controls">
+					<h3>What changed</h3>
+					<nav class="change-controls" aria-label="Filter library changes">
+						<div class="filter-options">
+							<label class="status-filter">
+								<span>Status</span>
+								<select bind:value={statusFilter} aria-label="Filter by status">
+									<option value="">All statuses</option>
+									{#each statusFilters as filter (filter.value)}
+										<option value={filter.value}>{filter.label}</option>
+									{/each}
+								</select>
+								<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="1.8" /></svg>
+							</label>
+							<label class="type-filter">
+								<span>Type</span>
+								<select bind:value={kindFilter} aria-label="Filter by type">
+									<option value="">All types</option>
+									{#each Object.entries(kindLabels) as [kind, label] (kind)}
+										<option value={kind}>{label}</option>
+									{/each}
+								</select>
+								<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="1.8" /></svg>
+							</label>
+						</div>
 						<label class="search-field">
 							<svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
 								<circle cx="8.8" cy="8.8" r="5.8" stroke="currentColor" stroke-width="1.5" />
@@ -443,7 +490,7 @@
 							<span class="sr-only">Search library changes</span>
 							<input bind:value={search} placeholder="Find a policy or scope" />
 						</label>
-					</div>
+					</nav>
 				</div>
 
 				{#if report.changes.length === 0}
@@ -453,6 +500,7 @@
 					</div>
 				{:else}
 				<div class="file-list">
+					{#if visibleChanges.length > 0}
 					{#each visibleChanges as change (change.id)}
 						<details class="file-change" open={expandedChanges[change.id] ?? false}
 							ontoggle={(event) => { expandedChanges[change.id] = event.currentTarget.open; }}>
@@ -473,7 +521,10 @@
 								</span>
 								<span class="file-path">
 									<strong>{change.title}</strong>
-									<small>{kindLabels[change.kind]} · {change.summary}</small>
+									<span class="file-meta">
+										<span class="change-kind">{kindLabels[change.kind]}</span>
+										<small>{change.summary}</small>
+									</span>
 								</span>
 								<span class="version-change" class:version-updated={Boolean(change.beforeVersion && change.afterVersion && change.beforeVersion !== change.afterVersion)}>
 									{#if change.beforeVersion && change.afterVersion && change.beforeVersion !== change.afterVersion}
@@ -487,11 +538,18 @@
 								</svg>
 							</summary>
 							{#if expandedChanges[change.id]}
+							{@const assignmentDeltas = assignmentChanges(change.assignmentsBefore, change.assignmentsAfter)}
+							{@const referenceOnlyAssignmentChange = assignmentDeltas.length > 0 && assignmentDeltas.every((assignment) =>
+								assignment.changes.length === 1 && assignment.changes[0].label === 'Referenced definition')}
+							{@const assignmentSections = [
+								{ label: 'Previous affected assignments', assignments: changedAssignments(change.assignmentsBefore, change.assignmentsAfter), show: change.status !== 'added' && assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) },
+								{ label: change.status === 'added' ? 'Library assignments' : 'Current library assignments', assignments: assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) ? changedAssignments(change.assignmentsAfter, change.assignmentsBefore) : change.assignmentsAfter, show: change.status !== 'removed' }
+							]}
 							<div class="file-detail">
 								<p class="change-outcome">{change.summary}</p>
-								{#each assignmentChanges(change.assignmentsBefore, change.assignmentsAfter) as assignment}
+								{#each assignmentDeltas as assignment}
 									<div class="detail-group assignment-delta">
-										<h4>Assignment change: {assignment.name}</h4>
+										<h4>{referenceOnlyAssignmentChange ? 'Assignment reference' : `Assignment change: ${assignment.name}`}</h4>
 										<dl class="delta-list">
 											{#each assignment.changes as delta}
 												<div>
@@ -502,12 +560,12 @@
 											{/each}
 										</dl>
 										{#if assignment.unchanged.length}
-											<p class="unchanged-context">Unchanged: {assignment.unchanged.join(', ')}.</p>
+											<p class="unchanged-context">{referenceOnlyAssignmentChange ? 'Assignment settings are unchanged.' : `Unchanged: ${assignment.unchanged.join(', ')}.`}</p>
 										{/if}
 									</div>
 								{/each}
-								{#if change.description}<p class="change-summary">{change.description}</p>{/if}
-								{#if change.facts.length}
+								{#if !referenceOnlyAssignmentChange && change.description}<p class="change-summary">{change.description}</p>{/if}
+								{#if !referenceOnlyAssignmentChange && change.facts.length}
 									<div class="detail-group">
 										<h4>Change explained</h4>
 										<ul class="fact-list">
@@ -517,35 +575,71 @@
 										</ul>
 									</div>
 								{/if}
-								{#each [
-									{ label: 'Previous affected assignments', assignments: changedAssignments(change.assignmentsBefore, change.assignmentsAfter), show: change.status !== 'added' && assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) },
-									{ label: change.status === 'added' ? 'Library assignments' : 'Current library assignments', assignments: assignmentFacts(change.assignmentsBefore) !== assignmentFacts(change.assignmentsAfter) ? changedAssignments(change.assignmentsAfter, change.assignmentsBefore) : change.assignmentsAfter, show: change.status !== 'removed' }
-								] as section}
-									{#if section.show && section.assignments.length}
-										<div class="detail-group assignment-context">
-											<h4>{section.label}</h4>
-											{#each section.assignments as assignment}
-												<div class="assignment-row">
-													<strong>{assignment.name}</strong>
-													<p>References: {assignment.definition}</p>
-													<p>{assignment.effect}</p>
-													<p>{assignment.enforcement}</p>
-													<ul class="fact-list">
-														{#each assignment.scopes as scope}<li>{scope}</li>{/each}
-														{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
-														{#each assignment.notes as note}<li>{note}</li>{/each}
-													</ul>
-													<div class="source-links">
-														{#each assignment.sources as source}
-															<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
-														{/each}
-													</div>
+								{#if referenceOnlyAssignmentChange}
+									<details class="assignment-evidence">
+										<summary>Show full assignment context</summary>
+										{#each assignmentSections as section}
+											{#if section.show && section.assignments.length}
+												<div class="detail-group assignment-context">
+													<h4>{section.label}</h4>
+													{#each section.assignments as assignment}
+														<div class="assignment-row">
+															<strong>{assignment.name}</strong>
+															<p>References: {assignment.definition}</p>
+															<p>{assignment.effect}</p>
+															<p>{assignment.enforcement}</p>
+															<ul class="fact-list">
+																{#each assignment.scopes as scope}<li>{scope}</li>{/each}
+																{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
+																{#each assignment.notes as note}<li>{note}</li>{/each}
+															</ul>
+															<div class="source-links">
+																{#each assignment.sources as source}
+																	<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
+																{/each}
+															</div>
+														</div>
+													{/each}
 												</div>
-											{/each}
-										</div>
-									{/if}
-								{/each}
-								{#if change.warnings.length}
+											{/if}
+										{/each}
+										{#if change.warnings.length}
+											<div class="detail-group review-notes">
+												<h4>Interpretation notes</h4>
+												<ul class="fact-list">
+													{#each change.warnings as warning}<li>{warning}</li>{/each}
+												</ul>
+											</div>
+										{/if}
+									</details>
+								{:else}
+									{#each assignmentSections as section}
+										{#if section.show && section.assignments.length}
+											<div class="detail-group assignment-context">
+												<h4>{section.label}</h4>
+												{#each section.assignments as assignment}
+													<div class="assignment-row">
+														<strong>{assignment.name}</strong>
+														<p>References: {assignment.definition}</p>
+														<p>{assignment.effect}</p>
+														<p>{assignment.enforcement}</p>
+														<ul class="fact-list">
+															{#each assignment.scopes as scope}<li>{scope}</li>{/each}
+															{#each assignment.parameters as parameter}<li>{parameter}</li>{/each}
+															{#each assignment.notes as note}<li>{note}</li>{/each}
+														</ul>
+														<div class="source-links">
+															{#each assignment.sources as source}
+																<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
+															{/each}
+														</div>
+													</div>
+												{/each}
+											</div>
+											{/if}
+										{/each}
+								{/if}
+								{#if !referenceOnlyAssignmentChange && change.warnings.length}
 									<div class="detail-group review-notes">
 										<h4>Interpretation notes</h4>
 										<ul class="fact-list">
@@ -561,12 +655,13 @@
 							</div>
 							{/if}
 						</details>
+					{/each}
 					{:else}
 						<div class="empty-filter">
-							<strong>No library changes match your search.</strong>
-							<button class="text-button" onclick={() => { search = ''; }}>Clear search</button>
+							<strong>No library changes match these filters.</strong>
+							<button class="text-button" onclick={clearFilters}>Clear filters</button>
 						</div>
-					{/each}
+					{/if}
 				</div>
 				{/if}
 
@@ -647,7 +742,7 @@
 		text-decoration: none;
 	}
 	.repository-name { min-width: 0; }
-	.repository-link:hover, .report-meta a:hover { color: #145bc0; }
+	.repository-link:hover { color: #145bc0; }
 	.content { max-width: 1180px; margin: 0 auto; padding: 48px max(28px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left)); }
 	.intro {
 		text-align: center;
@@ -662,6 +757,8 @@
 		font-weight: 680;
 	}
 	.intro p { max-width: 620px; margin: 16px auto 0; color: #53657b; font-size: 16px; }
+	.intro a { color: #315e91; text-decoration: underline; text-underline-offset: 3px; }
+	.intro a:hover { color: #145bc0; }
 	.comparison-form {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) auto;
@@ -748,7 +845,7 @@
 	.error-notice strong { color: #713a33; }
 	.error-notice span { flex-basis: 100%; }
 	.error-notice .text-button { margin-left: auto; }
-	.report { margin-top: 48px; }
+	.report { margin-top: 24px; }
 	.report-heading {
 		display: flex;
 		align-items: center;
@@ -757,7 +854,6 @@
 		gap: 8px 24px;
 	}
 	.report-meta { color: #52647b; font-size: 12px; }
-	.report-meta a { display: inline-flex; min-height: 44px; align-items: center; color: #315e91; text-decoration: none; }
 	.coverage-warning { border-color: #dfc996; background: #fff8e8; color: #795515; }
 	.coverage-warning strong { color: #795515; }
 	.totals { display: flex; flex-wrap: wrap; gap: 14px; color: #596b80; font-size: 12px; white-space: nowrap; }
@@ -769,18 +865,24 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 20px;
-		padding: 24px 0 13px;
+		padding: 36px 0 13px;
+		border-bottom: 1px solid #cbd5e1;
 	}
-	.changes-heading > div:first-child { display: flex; align-items: baseline; gap: 11px; }
 	.changes-heading h3 { color: #20344c; font-size: 18px; letter-spacing: -0.02em; }
-	.changes-heading > div:first-child span { color: #52647b; font-size: 12px; }
-	.change-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+	.change-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
+	.filter-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+	.status-filter, .type-filter { position: relative; display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #c5d0de; border-radius: 5px; background: #fff; color: #52647b; font-size: 13px; font-weight: 600; }
+	.status-filter:focus-within, .type-filter:focus-within { border-color: #3181dc; box-shadow: 0 0 0 2px #d8eaff; }
+	.status-filter select, .type-filter select { appearance: none; min-height: 42px; max-width: 220px; padding: 0 24px 0 0; border: 0; border-radius: 0; background: transparent; color: #192639; font-size: 14px; cursor: pointer; }
+	.status-filter select:focus-visible, .type-filter select:focus-visible { outline: none; }
+	.status-filter svg, .type-filter svg { position: absolute; top: 50%; right: 9px; width: 20px; height: 20px; transform: translateY(-50%); pointer-events: none; color: #175ba9; }
 	.search-field { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 9px; }
+	.search-field { margin-left: auto; }
 	.search-field svg { width: 16px; height: 16px; color: #708198; }
 	.search-field input { width: 220px; min-width: 0; min-height: 44px; border: 0; background: transparent; color: #243950; font-size: 14px; }
 	.search-field input::placeholder { color: #52647b; opacity: 1; }
 	.search-field:focus-within { border-color: #3181dc; box-shadow: 0 0 0 2px #d8eaff; }
-	.file-list { border-top: 1px solid #cbd5e1; }
+	.file-list { border-top: 0; }
 	.file-change { border-bottom: 1px solid #d8e0e9; background: #fff; }
 	.file-change summary {
 		display: grid;
@@ -812,6 +914,8 @@
 	.status-deprecated { color: #b45309; }
 	.file-path { display: grid; min-width: 0; gap: 3px; }
 	.file-path > strong { color: #234c7e; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+	.file-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+	.change-kind { display: inline-flex; width: fit-content; align-items: center; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f4f7fb; color: #192639; font-size: 12px; font-weight: 650; line-height: 1.3; }
 	.file-path small { color: #52647b; font-size: 12px; overflow-wrap: anywhere; }
 	.version-change { color: #314e6d; font-size: 12px; text-align: right; overflow-wrap: anywhere; }
 	.version-updated { color: #192639; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -824,6 +928,8 @@
 	.delta-list dd { margin: 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; overflow-wrap: anywhere; }
 	.delta-label { color: #52647b; }
 	.unchanged-context { margin-top: 8px; color: #52647b; font-size: 13px; }
+	.assignment-evidence { margin-top: 14px; }
+	.assignment-evidence > summary { min-height: 44px; width: fit-content; display: flex; align-items: center; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 	.change-summary { padding: 5px 0 13px; color: #4d6077; font-size: 13px; overflow-wrap: anywhere; }
 	.detail-group { margin-top: 14px; }
 	.detail-group h4 { margin-bottom: 8px; color: #314e6d; font-size: 13px; font-weight: 700; }
@@ -865,10 +971,10 @@
 		.comparison-form { grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); gap: 14px; }
 		.compare-button { grid-column: 1 / -1; justify-self: end; }
 		.comparison-form .compare-button { align-self: center; }
-		.changes-heading { align-items: flex-start; flex-direction: column; }
 		.file-change summary { grid-template-columns: 48px minmax(0, 1fr) 100px 20px; }
-		.change-controls { width: 100%; }
-		.search-field { flex: 1; }
+		.changes-heading { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+		.change-controls { justify-content: flex-start; width: 100%; padding-bottom: 12px; border-bottom: 0; }
+		.search-field { flex: 0 1 263px; }
 		.search-field input { width: 100%; }
 	}
 	@media (max-width: 650px) {
@@ -883,12 +989,17 @@
 		.direction { height: 20px; }
 		.direction svg { transform: rotate(90deg); }
 		.compare-button { grid-column: auto; width: 100%; margin-top: 8px; }
-		.report { margin-top: 36px; }
+		.report { margin-top: 24px; }
 		.report-heading { align-items: flex-start; flex-direction: column; }
 		.totals { gap: 13px; }
-		.changes-heading { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: start; gap: 12px; }
-		.changes-heading > div:first-child { justify-content: space-between; }
-		.change-controls { width: 100%; }
+		.changes-heading { align-items: start; gap: 12px; }
+		.change-controls { align-items: stretch; flex-direction: column; }
+		.filter-options { align-items: flex-start; flex-direction: column; }
+		.status-filter { width: 100%; }
+		.status-filter select { flex: 1; max-width: none; }
+		.type-filter { width: 100%; justify-content: space-between; }
+		.type-filter select { flex: 1; max-width: none; }
+		.search-field { flex: 0 0 auto; width: 100%; margin-left: 0; }
 		.search-field input { width: 100%; }
 		.search-field input { font-size: 16px; }
 		.file-change summary { grid-template-columns: minmax(0, 1fr) auto 16px; gap: 10px 8px; padding: 16px 12px; }

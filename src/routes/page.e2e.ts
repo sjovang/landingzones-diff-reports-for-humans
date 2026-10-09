@@ -70,6 +70,9 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByRole('link', { name: 'ALZ Release Brief home' })).toBeVisible();
 	await expect.poll(() => page.locator('.brand-mark').evaluate((image) =>
 		image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
+	const upstreamLink = page.getByRole('link', { name: 'Azure Landing Zones Library', exact: true });
+	await expect(upstreamLink).toHaveAttribute('href', 'https://github.com/Azure/azure-landing-zones-library');
+	await expect(upstreamLink).toHaveAttribute('target', '_blank');
 	await expect(page.getByLabel(/FROM Release/)).toHaveValue(releases[1].tag);
 	await expect(page.locator('footer')).toHaveCount(0);
 	await expect(page.locator('.scope-note')).toHaveCount(0);
@@ -97,13 +100,23 @@ test('explains policy versions, effects, and scopes with source links instead of
 
 	await page.getByRole('button', { name: /Compare releases/ }).click();
 	await expect(page.getByRole('heading', { name: '2025.10.0 to 2026.10.0' })).toBeVisible();
+	const reportGap = await page.evaluate(() => {
+		const pickerBottom = document.querySelector('.comparison-form')!.getBoundingClientRect().bottom;
+		const reportTop = document.querySelector('.report')!.getBoundingClientRect().top;
+		return reportTop - pickerBottom;
+	});
+	expect(reportGap).toBe(24);
 	await expect(page.locator('#report-title')).toHaveClass(/\bsr-only\b/);
 	await expect(page.locator('.coverage-warning')).toHaveCount(0);
 	await expect(page.locator('.summary-copy, .report-context')).toHaveCount(0);
 	await expect(page.getByLabel('Library change totals')).toBeVisible();
 	await expect(page.locator('.summary-strip')).toHaveCount(0);
 	await expect(page.locator('.report-heading .totals')).toHaveCount(1);
+	await expect(page.locator('.changes-heading [aria-live]')).toHaveCount(0);
+	await expect(page.locator('.report-meta a')).toHaveCount(0);
 	await expect(page.locator('.report-heading time')).toHaveAttribute('datetime', report.generatedAt);
+	await expect(page.locator('.report-meta')).toHaveText(/^Generated /);
+	await expect(page.locator('.changes-heading')).toHaveCSS('padding-top', '36px');
 	await expect(page.locator('.report-heading')).toHaveCSS('border-top-width', '0px');
 	await expect(page.locator('.report-heading')).toHaveCSS('border-bottom-width', '0px');
 	await expect(page.locator('footer')).toHaveCount(0);
@@ -120,10 +133,10 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByRole('link', { name: 'View source changes on GitHub' })).toHaveAttribute('href', /github.com/);
 	await expect(page.locator('pre')).toHaveCount(0);
 	await page.getByLabel('Search library changes').fill('no match');
-	await expect(page.getByText('No library changes match your search.')).toBeVisible();
-	await page.getByRole('button', { name: 'Clear search' }).click();
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.locator('.change-controls input')).toHaveCount(1);
-	await expect(page.locator('.change-controls select')).toHaveCount(0);
+	await expect(page.locator('.change-controls select')).toHaveCount(2);
 	await expect(fileSummary).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -196,7 +209,7 @@ test('shows an initiative replacement separately from unchanged policy settings'
 	const assignment = report.changes[0].assignmentsAfter[0];
 	const before = { ...assignment, definition: 'Network guardrails (Network_20250326, version 2.0.0)', definitionId: 'Network_20250326', definitionVersion: '2.0.0' };
 	const after = { ...before, definition: 'Network guardrails (Network_20260714, version 2.1.0)', definitionId: 'Network_20260714', definitionVersion: '2.1.0' };
-	const summary = 'Assignment now uses Network guardrails, version 2.1.0. The policy definition is unchanged.';
+	const summary = 'Assignment now references Network guardrails, version 2.1.0. Policy rules and assignment settings are unchanged.';
 	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases } }));
 	await page.route('**/api/comparisons', (route) => route.fulfill({ json: {
 		status: 'completed', report: { ...report, changes: [{
@@ -212,17 +225,24 @@ test('shows an initiative replacement separately from unchanged policy settings'
 	await expect(page.locator('.assignment-delta dt')).toHaveText('Referenced definition');
 	await expect(page.locator('.assignment-delta dd').nth(0)).toContainText('Network_20250326, version 2.0.0');
 	await expect(page.locator('.assignment-delta dd').nth(1)).toContainText('Network_20260714, version 2.1.0');
-	await expect(page.locator('.unchanged-context')).toHaveText('Unchanged: effect, enforcement, scopes, parameters and version selections.');
+	await expect(page.locator('.unchanged-context')).toHaveText('Assignment settings are unchanged.');
+	await expect(page.locator('.change-summary')).toHaveCount(0);
+	await expect(page.locator('.assignment-context').first()).toBeHidden();
+	await expect(page.locator('.review-notes')).toBeHidden();
+	await page.getByText('Show full assignment context').click();
+	await expect(page.locator('.assignment-context')).toHaveCount(2);
+	await expect(page.locator('.assignment-context').first()).toBeVisible();
+	await expect(page.locator('.review-notes')).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('distinguishes added, updated, removed, and deprecated items with accessible icon-only statuses', async ({ page }) => {
 	const changes = [
 		{ ...report.changes[0], id: 'new', title: 'New policy', status: 'added', beforeVersion: undefined },
-		{ ...report.changes[0], id: 'updated', title: 'Updated policy', status: 'modified' },
-		{ ...report.changes[0], id: 'removed', title: 'Removed policy', status: 'removed' },
-		{ ...report.changes[0], id: 'deprecated', title: 'Deprecated policy', status: 'modified', deprecated: true },
-		{ ...report.changes[0], id: 'deprecation-only', title: 'Deprecation-only policy', status: 'modified',
+		{ ...report.changes[0], id: 'updated', title: 'Updated initiative', kind: 'initiative', status: 'modified' },
+		{ ...report.changes[0], id: 'removed', title: 'Removed archetype', kind: 'archetype', status: 'removed' },
+		{ ...report.changes[0], id: 'deprecated', title: 'Deprecated assignment', kind: 'assignment', status: 'modified', deprecated: true },
+		{ ...report.changes[0], id: 'deprecation-only', title: 'Deprecation-only architecture', kind: 'architecture', status: 'modified',
 			deprecated: true, deprecationOnly: true, beforeVersion: '1.1.0', afterVersion: '1.1.0-deprecated' }
 	];
 	await page.route('**/api/releases', (route) => route.fulfill({ status: 200, json: { releases } }));
@@ -231,11 +251,17 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 	}));
 	await page.goto('/');
 	await page.getByRole('button', { name: /Compare releases/ }).click();
+	await expect(page.locator('.file-path > strong')).toHaveText([
+		'New policy', 'Removed archetype', 'Deprecated assignment', 'Deprecation-only architecture', 'Updated initiative'
+	]);
+	await expect(page.locator('.change-kind')).toHaveText([
+		'Policy definition', 'Archetype definition', 'Policy assignment', 'Architecture definition', 'Policy initiative'
+	]);
 	for (const [title, label, color] of [
 		['New policy', 'Added', 'rgb(37, 112, 72)'],
-		['Updated policy', 'Updated', 'rgb(23, 91, 169)'],
-		['Removed policy', 'Removed', 'rgb(161, 60, 64)'],
-		['Deprecated policy', 'Deprecated', 'rgb(180, 83, 9)']
+		['Updated initiative', 'Updated', 'rgb(23, 91, 169)'],
+		['Removed archetype', 'Removed', 'rgb(161, 60, 64)'],
+		['Deprecated assignment', 'Deprecated', 'rgb(180, 83, 9)']
 	]) {
 		const summary = page.locator('summary').filter({ hasText: title });
 		const badge = summary.locator('.file-status').filter({ hasText: label });
@@ -249,7 +275,7 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		await expect(badge.locator('svg[aria-hidden="true"]')).toHaveCount(1);
 		await expect(badge.locator('svg')).toHaveCSS('width', '20px');
 	}
-	const deprecated = page.locator('summary').filter({ hasText: 'Deprecated policy' });
+	const deprecated = page.locator('summary').filter({ hasText: 'Deprecated assignment' });
 	await expect(page.locator('summary').filter({ hasText: 'New policy' }).locator('.version-change')).not.toHaveClass(/version-updated/);
 	await expect(deprecated.locator('.file-status')).toHaveCount(2);
 	const icons = await deprecated.locator('.file-status').evaluateAll((elements) =>
@@ -259,9 +285,78 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		}));
 	expect(icons[0].top).toBe(icons[1].top);
 	expect(icons[1].left).toBeGreaterThan(icons[0].right);
-	const deprecationOnly = page.locator('summary').filter({ hasText: 'Deprecation-only policy' });
+	const deprecationOnly = page.locator('summary').filter({ hasText: 'Deprecation-only architecture' });
 	await expect(deprecationOnly.locator('.file-status')).toHaveCount(1);
 	await expect(deprecationOnly.locator('.file-status')).toHaveAttribute('title', 'Deprecated');
+
+	for (const [status, titles] of [
+		['added', ['New policy']],
+		['modified', ['Updated initiative']],
+		['deprecated', ['Deprecated assignment', 'Deprecation-only architecture']],
+		['removed', ['Removed archetype']]
+	] as const) {
+		const filter = page.getByLabel('Filter by status');
+		await filter.selectOption(status);
+		await expect(filter).toHaveValue(status);
+		await expect(page.locator('.file-path > strong')).toHaveText(titles);
+	}
+	await page.getByLabel('Filter by status').selectOption('');
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	await page.getByLabel('Filter by status').selectOption('added');
+	await page.getByLabel('Filter by type').selectOption('initiative');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	await page.getByLabel('Filter by type').selectOption('initiative');
+	await expect(page.locator('.file-path > strong')).toHaveText(['Updated initiative']);
+	await page.getByLabel('Search library changes').fill('not found');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	const filterLayout = await page.evaluate(() => {
+		const bounds = (selector: string) => {
+			const { left, right, top, bottom } = document.querySelector(selector)!.getBoundingClientRect();
+			return { left, right, top, bottom };
+		};
+		return {
+			heading: bounds('.changes-heading'),
+			headingText: bounds('.changes-heading h3'),
+			toolbar: bounds('.change-controls'),
+			status: bounds('.status-filter'),
+			type: bounds('.type-filter'),
+			search: bounds('.search-field'),
+			statusStyle: getComputedStyle(document.querySelector('.status-filter')!),
+			typeStyle: getComputedStyle(document.querySelector('.type-filter')!),
+			searchStyle: getComputedStyle(document.querySelector('.search-field')!),
+			controlHeights: [...document.querySelectorAll('.status-filter, .type-filter, .search-field')]
+				.map((element) => element.getBoundingClientRect().height)
+		};
+	});
+	expect(filterLayout.search.right).toBeLessThanOrEqual(filterLayout.toolbar.right + 1);
+	expect(filterLayout.controlHeights.every((height) => height >= 44)).toBe(true);
+	if (page.viewportSize()!.width <= 650) expect(filterLayout.controlHeights.at(-1)).toBeLessThanOrEqual(48);
+	for (const fieldStyle of [filterLayout.statusStyle, filterLayout.typeStyle]) {
+		expect(fieldStyle.borderTopWidth).toBe(filterLayout.searchStyle.borderTopWidth);
+		expect(fieldStyle.borderTopColor).toBe(filterLayout.searchStyle.borderTopColor);
+		expect(fieldStyle.borderTopLeftRadius).toBe(filterLayout.searchStyle.borderTopLeftRadius);
+		expect(fieldStyle.backgroundColor).toBe(filterLayout.searchStyle.backgroundColor);
+	}
+	if (page.viewportSize()!.width > 900) {
+		expect(filterLayout.headingText.left).toBe(filterLayout.heading.left);
+		expect(filterLayout.headingText.right).toBeLessThan(filterLayout.toolbar.left);
+		expect(Math.abs(filterLayout.headingText.top + filterLayout.headingText.bottom - filterLayout.toolbar.top - filterLayout.toolbar.bottom)).toBeLessThanOrEqual(20);
+		expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
+	} else if (page.viewportSize()!.width > 650) {
+		expect(filterLayout.toolbar.top).toBeGreaterThan(filterLayout.headingText.bottom);
+		expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
+	} else {
+		expect(filterLayout.toolbar.top).toBeGreaterThan(filterLayout.headingText.bottom);
+		expect(filterLayout.search.top).toBeGreaterThan(filterLayout.type.bottom);
+	}
+	await page.getByLabel('Filter by status').focus();
+	await expect(page.locator('.status-filter')).toHaveCSS('border-top-color', 'rgb(49, 129, 220)');
+	await page.getByLabel('Filter by type').focus();
+	await expect(page.locator('.type-filter')).toHaveCSS('border-top-color', 'rgb(49, 129, 220)');
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -362,7 +457,7 @@ test('adapts reports across narrow, tablet, landscape, and wide viewports', asyn
 	for (const [width, height] of [[320, 700], [390, 844], [650, 900], [768, 1024], [844, 390], [1024, 768], [1920, 1080]]) {
 		await page.setViewportSize({ width, height });
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-		expect(await page.locator('.brand, .repository-link, .report-meta a, .search-field input, .source-links a')
+		expect(await page.locator('.brand, .repository-link, .search-field input, .source-links a')
 			.evaluateAll((elements) => elements.every((element) => element.getBoundingClientRect().height >= 44))).toBe(true);
 		if (width <= 650) {
 			const title = await page.locator('.file-path').boundingBox();
@@ -400,7 +495,7 @@ test('keeps long multilingual content usable with accessible controls and reduce
 			elements.every((element) => element.getBoundingClientRect().height >= 44))).toBe(true);
 	}
 	await page.getByLabel('Search library changes').fill('nonexistent');
-	await expect(page.locator('.changes-heading [aria-live]')).toHaveText('0 of 1 updates');
+	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
 });
 
 test('renders details on demand and preserves keyboard disclosure across filters', async ({ page }) => {
@@ -424,7 +519,7 @@ test('renders details on demand and preserves keyboard disclosure across filters
 	await expect(page.getByText('Current library assignments')).toBeVisible();
 	await page.getByLabel('Search library changes').fill('no match');
 	await expect(page.locator('summary')).toHaveCount(0);
-	await page.getByRole('button', { name: 'Clear search' }).click();
+	await page.getByRole('button', { name: 'Clear filters' }).click();
 	await expect(page.locator('.file-detail')).toHaveCount(1);
 	await first.focus();
 	await page.keyboard.press('Space');

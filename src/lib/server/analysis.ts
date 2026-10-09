@@ -531,7 +531,7 @@ function sourceLink(sha: string, path: string): string {
 function contextSummary(before: PolicyAssignmentContext[], after: PolicyAssignmentContext[], kind: ChangeKind): string {
 	const unchanged = `The ${kind} definition is unchanged.`;
 	const replaced = after.find((context) => before.some((old) => old.assignmentId === context.assignmentId && old.definitionId !== context.definitionId));
-	if (replaced) return `Assignment now uses ${replaced.definitionTitle}${replaced.definitionVersion ? `, version ${replaced.definitionVersion}` : ''}. ${unchanged}`;
+	if (replaced) return `Assignment now references ${replaced.definitionTitle}${replaced.definitionVersion ? `, version ${replaced.definitionVersion}` : ''}. Policy rules and assignment settings are unchanged.`;
 	if (!equal(before.map((item) => item.scopes), after.map((item) => item.scopes))) {
 		return `Library assignment scopes changed. ${unchanged}`;
 	}
