@@ -1,4 +1,4 @@
-name: alzlib-diff-for-humans
+name: landingzones-diff-reports-for-humans
 infra:
   provider: bicep
   path: infra

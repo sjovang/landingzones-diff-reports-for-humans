@@ -56,7 +56,7 @@ PR creates a draft release, builds artifacts from its exact tag, attaches the
 Functions ZIP, `web-image.txt`, and `SHA256SUMS`, then publishes the release.
 
 ```text
-ghcr.io/sjovang/alzlib-diff-for-humans:v0.1.0
+ghcr.io/sjovang/landingzones-diff-reports-for-humans:v0.1.0
 functions-v0.1.0.zip
 web-image.txt
 SHA256SUMS
@@ -72,12 +72,16 @@ by selecting an earlier digest, or fix a release with a new SemVer version.
 The repository must have **immutable releases** enabled and **Allow GitHub
 Actions to create and approve pull requests** enabled in its Actions settings.
 Both settings were enabled when this workflow was introduced. The workflow
-fails rather than publishing an unlocked release if immutability is disabled.
-It uses the built-in `GITHUB_TOKEN`; artifact publication runs in the same
+uses the built-in `GITHUB_TOKEN`, which cannot read the admin-only repository
+immutability setting. Instead, it verifies the release's `immutable` status
+after publication. If immutability is disabled, this check fails, but the
+release has already been published without being locked. Keep the setting
+enabled before publishing releases. Artifact publication runs in the same
 workflow because releases created with that token do not trigger another
 release-event workflow. No Azure credential is required.
 
-If artifact publication fails, the release stays a draft. Resume it through
+If artifact publication fails before the draft is published, the release stays
+a draft. Resume it through
 **Release artifacts** in the Actions tab with the existing tag. Existing image
 tags are reused only after their source revision and version are checked;
 already attached assets are retained and checked, never overwritten. Do not

@@ -80,8 +80,8 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.getByLabel(/FROM Release/)).toHaveValue(releases[1].tag);
 	await expect(page.locator('footer')).toHaveCount(0);
 	await expect(page.locator('.scope-note')).toHaveCount(0);
-	await expect(page.locator('.repository-link')).toHaveAttribute('href', 'https://github.com/sjovang/alzlib-diff-for-humans');
-	await expect(page.locator('.repository-name')).toHaveText('sjovang / alzlib-diff-for-humans');
+	await expect(page.locator('.repository-link')).toHaveAttribute('href', 'https://github.com/sjovang/landingzones-diff-reports-for-humans');
+	await expect(page.locator('.repository-name')).toHaveText('sjovang / landingzones-diff-reports-for-humans');
 	await awaitCompareButton(page);
 	await expect(page.locator('.intro')).toHaveCSS('text-align', 'center');
 	const introSpacing = await page.evaluate(() => {

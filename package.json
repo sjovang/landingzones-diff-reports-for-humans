@@ -1,17 +1,17 @@
 {
-	"name": "alzlib-diff-for-humans",
+	"name": "landingzones-diff-reports-for-humans",
 	"description": "Landing Zone Release Brief: human-readable comparisons of ALZ and SLZ library releases.",
 	"private": true,
 	"version": "0.0.1",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/sjovang/alzlib-diff-for-humans.git"
+		"url": "git+https://github.com/sjovang/landingzones-diff-reports-for-humans.git"
 	},
 	"bugs": {
-		"url": "https://github.com/sjovang/alzlib-diff-for-humans/issues"
+		"url": "https://github.com/sjovang/landingzones-diff-reports-for-humans/issues"
 	},
-	"homepage": "https://github.com/sjovang/alzlib-diff-for-humans#readme",
+	"homepage": "https://github.com/sjovang/landingzones-diff-reports-for-humans#readme",
 	"type": "module",
 	"scripts": {
 		"dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev",
