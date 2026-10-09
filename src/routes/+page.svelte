@@ -27,7 +27,7 @@
 	let jobStatus = $state<ComparisonStatus | null>(null);
 	let pageError = $state('');
 	let search = $state('');
-	let selectedStatuses = $state<ChangeFilter[]>([]);
+	let statusFilter = $state<ChangeFilter | ''>('');
 	let kindFilter = $state('');
 	let announcement = $state('');
 	const lifecycle = new AbortController();
@@ -67,12 +67,10 @@
 	);
 	const searchQuery = $derived(search.toLowerCase());
 	function matchesStatus(change: ReleaseChange) {
-		if (selectedStatuses.length === 0) return true;
-		return selectedStatuses.some((status) => {
-			if (status === 'deprecated') return Boolean(change.deprecated);
-			if (status === 'modified') return change.status === 'modified' && !change.deprecated;
-			return change.status === status;
-		});
+		if (!statusFilter) return true;
+		if (statusFilter === 'deprecated') return Boolean(change.deprecated);
+		if (statusFilter === 'modified') return change.status === 'modified' && !change.deprecated;
+		return change.status === statusFilter;
 	}
 	const visibleChanges = $derived(
 		searchableChanges.filter(({ change, text }) =>
@@ -85,15 +83,9 @@
 			})
 	);
 
-	function toggleStatusFilter(status: ChangeFilter) {
-		selectedStatuses = selectedStatuses.includes(status)
-			? selectedStatuses.filter((selected) => selected !== status)
-			: [...selectedStatuses, status];
-	}
-
 	function clearFilters() {
 		search = '';
-		selectedStatuses = [];
+		statusFilter = '';
 		kindFilter = '';
 	}
 
@@ -473,13 +465,16 @@
 					</div>
 					<nav class="change-controls" aria-label="Filter library changes">
 						<div class="filter-options">
-							<div class="status-filters" role="group" aria-label="Filter by status">
-								{#each statusFilters as filter (filter.value)}
-									<button type="button" class="filter-chip" class:filter-chip-active={selectedStatuses.includes(filter.value)}
-										aria-pressed={selectedStatuses.includes(filter.value)}
-										onclick={() => toggleStatusFilter(filter.value)}>{filter.label}</button>
-								{/each}
-							</div>
+							<label class="status-filter">
+								<span>Status</span>
+								<select bind:value={statusFilter} aria-label="Filter by status">
+									<option value="">All statuses</option>
+									{#each statusFilters as filter (filter.value)}
+										<option value={filter.value}>{filter.label}</option>
+									{/each}
+								</select>
+								<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="1.8" /></svg>
+							</label>
 							<label class="type-filter">
 								<span>Type</span>
 								<select bind:value={kindFilter} aria-label="Filter by type">
@@ -488,6 +483,7 @@
 										<option value={kind}>{label}</option>
 									{/each}
 								</select>
+								<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="1.8" /></svg>
 							</label>
 						</div>
 						<label class="search-field">
@@ -878,12 +874,11 @@
 	.changes-heading > div:first-child span { color: #52647b; font-size: 12px; }
 	.change-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; width: 100%; padding-bottom: 12px; border-bottom: 1px solid #cbd5e1; }
 	.filter-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-	.status-filters { display: flex; flex-wrap: wrap; gap: 4px; }
-	.filter-chip { min-height: 44px; padding: 0 10px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #314e6d; font-size: 13px; font-weight: 600; cursor: pointer; }
-	.filter-chip:hover { background: #f4f7fb; }
-	.filter-chip-active { border-color: #9db8d8; background: #edf4fc; color: #192639; }
-	.type-filter { display: flex; min-height: 44px; align-items: center; gap: 8px; color: #52647b; font-size: 13px; font-weight: 600; }
-	.type-filter select { min-height: 44px; max-width: 220px; padding: 0 28px 0 10px; border: 1px solid #c5d0de; border-radius: 5px; background-color: #fff; color: #192639; font-size: 14px; }
+	.status-filter, .type-filter { position: relative; display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #c5d0de; border-radius: 5px; background: #fff; color: #52647b; font-size: 13px; font-weight: 600; }
+	.status-filter:focus-within, .type-filter:focus-within { border-color: #3181dc; box-shadow: 0 0 0 2px #d8eaff; }
+	.status-filter select, .type-filter select { appearance: none; min-height: 42px; max-width: 220px; padding: 0 24px 0 0; border: 0; border-radius: 0; background: transparent; color: #192639; font-size: 14px; cursor: pointer; }
+	.status-filter select:focus-visible, .type-filter select:focus-visible { outline: none; }
+	.status-filter svg, .type-filter svg { position: absolute; top: 50%; right: 9px; width: 20px; height: 20px; transform: translateY(-50%); pointer-events: none; color: #175ba9; }
 	.search-field { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 9px; }
 	.search-field { margin-left: auto; }
 	.search-field svg { width: 16px; height: 16px; color: #708198; }
@@ -1002,8 +997,8 @@
 		.changes-heading > div:first-child { justify-content: space-between; }
 		.change-controls { align-items: stretch; flex-direction: column; }
 		.filter-options { align-items: flex-start; flex-direction: column; }
-		.status-filters { width: 100%; }
-		.filter-chip { flex: 1; padding: 0 6px; }
+		.status-filter { width: 100%; }
+		.status-filter select { flex: 1; max-width: none; }
 		.type-filter { width: 100%; justify-content: space-between; }
 		.type-filter select { flex: 1; max-width: none; }
 		.search-field { width: 100%; margin-left: 0; }

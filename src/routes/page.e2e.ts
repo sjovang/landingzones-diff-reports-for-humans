@@ -277,20 +277,19 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 	await expect(deprecationOnly.locator('.file-status')).toHaveAttribute('title', 'Deprecated');
 
 	for (const [status, titles] of [
-		['New', ['New policy']],
-		['Updated', ['Updated initiative']],
-		['Deprecated', ['Deprecated assignment', 'Deprecation-only architecture']],
-		['Removed', ['Removed archetype']]
+		['added', ['New policy']],
+		['modified', ['Updated initiative']],
+		['deprecated', ['Deprecated assignment', 'Deprecation-only architecture']],
+		['removed', ['Removed archetype']]
 	] as const) {
-		const filter = page.getByRole('button', { name: status, exact: true });
-		await filter.click();
-		await expect(filter).toHaveAttribute('aria-pressed', 'true');
+		const filter = page.getByLabel('Filter by status');
+		await filter.selectOption(status);
+		await expect(filter).toHaveValue(status);
 		await expect(page.locator('.file-path > strong')).toHaveText(titles);
-		await filter.click();
 	}
-	await page.getByRole('button', { name: 'New', exact: true }).click();
-	await page.getByRole('button', { name: 'Removed', exact: true }).click();
-	await expect(page.locator('.file-path > strong')).toHaveText(['New policy', 'Removed archetype']);
+	await page.getByLabel('Filter by status').selectOption('');
+	await expect(page.locator('.file-path > strong')).toHaveCount(5);
+	await page.getByLabel('Filter by status').selectOption('added');
 	await page.getByLabel('Filter by type').selectOption('initiative');
 	await expect(page.getByText('No library changes match these filters.')).toBeVisible();
 	await page.getByRole('button', { name: 'Clear filters' }).click();
@@ -308,16 +307,30 @@ test('distinguishes added, updated, removed, and deprecated items with accessibl
 		};
 		return {
 			toolbar: bounds('.change-controls'),
+			status: bounds('.status-filter'),
 			type: bounds('.type-filter'),
 			search: bounds('.search-field'),
-			controlHeights: [...document.querySelectorAll('.filter-chip, .type-filter select, .search-field')]
+			statusStyle: getComputedStyle(document.querySelector('.status-filter')!),
+			typeStyle: getComputedStyle(document.querySelector('.type-filter')!),
+			searchStyle: getComputedStyle(document.querySelector('.search-field')!),
+			controlHeights: [...document.querySelectorAll('.status-filter, .type-filter, .search-field')]
 				.map((element) => element.getBoundingClientRect().height)
 		};
 	});
 	expect(filterLayout.search.right).toBeLessThanOrEqual(filterLayout.toolbar.right + 1);
 	expect(filterLayout.controlHeights.every((height) => height >= 44)).toBe(true);
+	for (const fieldStyle of [filterLayout.statusStyle, filterLayout.typeStyle]) {
+		expect(fieldStyle.borderTopWidth).toBe(filterLayout.searchStyle.borderTopWidth);
+		expect(fieldStyle.borderTopColor).toBe(filterLayout.searchStyle.borderTopColor);
+		expect(fieldStyle.borderTopLeftRadius).toBe(filterLayout.searchStyle.borderTopLeftRadius);
+		expect(fieldStyle.backgroundColor).toBe(filterLayout.searchStyle.backgroundColor);
+	}
 	if (page.viewportSize()!.width > 650) expect(filterLayout.search.left).toBeGreaterThan(filterLayout.type.right);
 	else expect(filterLayout.search.top).toBeGreaterThan(filterLayout.type.bottom);
+	await page.getByLabel('Filter by status').focus();
+	await expect(page.locator('.status-filter')).toHaveCSS('border-top-color', 'rgb(49, 129, 220)');
+	await page.getByLabel('Filter by type').focus();
+	await expect(page.locator('.type-filter')).toHaveCSS('border-top-color', 'rgb(49, 129, 220)');
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
