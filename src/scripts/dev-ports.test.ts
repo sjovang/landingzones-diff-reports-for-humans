@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
+import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -47,6 +48,19 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform === 'win32')('development port conflicts', () => {
+	it('accepts partial lsof results when a requested port is unused', async () => {
+		const { child, port } = await listener();
+		const server = createServer();
+		await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
+		const address = server.address();
+		if (!address || typeof address === 'string') throw new Error('Expected TCP port.');
+		const unusedPort = address.port;
+		await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+		const owners = await listPortProcesses([port, unusedPort]);
+		expect(owners).toEqual([expect.objectContaining({ pid: child.pid, ports: [port] })]);
+		expect(await listPortProcesses([unusedPort])).toEqual([]);
+	});
+
 	it('lists real port owners and does not stop them in non-interactive runs', async () => {
 		const { child, port } = await listener();
 		const io = terminal();

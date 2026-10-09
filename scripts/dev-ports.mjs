@@ -9,8 +9,11 @@ async function commandOutput(command, args, signal) {
 	try {
 		return (await execute(command, args, { signal, timeout: 10_000, maxBuffer: 1024 * 1024 })).stdout.trim();
 	} catch (error) {
-		// lsof and ps use exit code 1 when the listener/process has disappeared.
-		if (error.code === 1 && !error.stdout?.trim() && !error.stderr?.trim()) return '';
+		// macOS lsof can return 1 with valid output when some requested ports are unused.
+		if (error.code === 1 && !error.stderr?.trim()
+			&& (command === 'lsof' || (command === 'ps' && !error.stdout?.trim()))) {
+			return error.stdout?.trim() ?? '';
+		}
 		throw new Error(`Could not inspect port owners using ${command}: ${error.message}`, { cause: error });
 	}
 }
