@@ -24,10 +24,11 @@ Users compare releases of the Azure Landing Zones Library published at https://g
 
 ## Capabilities and Constraints
 
-- The first release compares published Azure Landing Zones (ALZ) releases under `platform/alz/`; Secure Landing Zones (SLZ), AMBA, and other library members are deferred.
+- Compare published Azure Landing Zones (ALZ) releases under `platform/alz/` or Sovereign Landing Zone (SLZ) releases under `platform/slz/`. Comparisons cannot mix the two libraries; AMBA and other members remain out of scope.
+- SLZ reports resolve each release's pinned ALZ dependency. Inherited definitions, assignments, and archetypes are included when relevant to the effective SLZ context; unrelated ALZ changes and architectures are excluded. Evidence uses each source's actual immutable commit.
 - Users do not need to interact with or modify Azure resources.
 - Release information is synchronized hourly from the fixed upstream GitHub repository and stored durably. Page loads and comparisons read the last successful catalog, not the GitHub API.
-- Release contents are cached by immutable commit SHA and reused across comparison pairs. Failed syncs retain the last successful catalog; a new install must synchronize before comparisons are available.
+- Release contents are cached by library scope and immutable commit SHA and reused across comparison pairs. Failed discovery, dependency resolution, or snapshot warm-up retains the last successful catalog; a new install must synchronize before comparisons are available.
 - Diff reports can be large and complex, so reports must be cached.
 - Reports should be easy to navigate, including collapsible detail sections.
 - Reports explain changes to policies, initiatives, and assignments rather than presenting changed files or raw JSON diffs as the result.
@@ -35,7 +36,7 @@ Users compare releases of the Azure Landing Zones Library published at https://g
 - Policy explanations prioritize version changes, purpose, changed evaluation rules and parameter defaults, configured effects, and library-defined assignment scopes.
 - Scope and effect context is resolved through initiatives, assignments, archetypes, and architectures in both releases. These are library configurations, not a view of deployed Azure resources.
 - Raw definitions and diffs are secondary evidence linked on GitHub. Missing built-in definitions and unsupported expressions must be identified explicitly, never guessed.
-- The comparison selector defaults to the newest two published ALZ releases and allows selection of other published ALZ tags.
+- The library selector defaults to ALZ and sits above the release pickers. Each library initially selects its newest two published releases, then remembers its last selected pair in browser-local storage. Switching libraries clears the report; shared links restore the chosen library and comparison. Existing ALZ links remain supported.
 - Generated reports are immutable and privately cached without automatic expiry during the prototype; revisit retention before deployment.
 
 ## Brand Commitments

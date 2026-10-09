@@ -1,0 +1,10 @@
+scripts:
+  - name: Setup
+    command: npm ci
+    triggers:
+      - session.create
+  - name: Run locally
+    command: npm run dev:all
+
+server_ready_pattern: '\[dev\] Open (http://127\.0\.0\.1:5173)\. All services are running'
+auto_open_in_browser: true

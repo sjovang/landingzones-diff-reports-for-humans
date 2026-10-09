@@ -273,6 +273,18 @@ assignment evidence remains available below the concise explanation.
 
 ### Comparison Form
 
+An ALZ/SLZ segmented radio group sits centered above the release pickers. Its
+selected segment uses Action Cobalt and white text; the other uses Slate
+Annotation over Inspection Wash. Each segment has a (44px) minimum hit height,
+and keyboard focus remains visible. The control stays compact on phones and
+is disabled while a comparison is being prepared.
+
+Both pickers show only the selected library. Switching clears the report and
+restores that library's last selected pair; the first selection uses the newest
+two releases. The description expands ALZ as Azure Landing Zones and SLZ as
+Sovereign Landing Zone. The heading and browser title reflect the selected
+library while the existing ALZ Release Brief brand remains unchanged.
+
 Two individually framed release pickers surround a simple direction arrow.
 Sentence-case labels sit beside versions inside compact (54px) pickers; full
 tag paths remain accessible descriptions rather than duplicated visible
@@ -281,6 +293,9 @@ moves below at (52px) high on tablets, and spans the width beneath stacked
 pickers on phones.
 The enclosing grid has no background, border, shadow, or padding.
 Compared tags persist in the URL so refresh restores the report automatically.
+The library also persists in the URL; links without it infer their library from
+the tags. SLZ reports include a quiet explanatory paragraph about pinned ALZ
+dependencies and inherited changes above the report controls.
 
 ### Report Disclosures
 

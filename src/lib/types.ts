@@ -1,12 +1,19 @@
-export interface AlzRelease {
+import type { LibraryScope } from './libraries.js';
+
+export interface LibraryRelease {
 	tag: string;
 	version: string;
 	url: string;
 }
 
-export interface StoredRelease extends AlzRelease {
+export interface ReleaseDependency extends LibraryRelease {
+	sha: string;
+}
+
+export interface StoredRelease extends LibraryRelease {
 	sha: string;
 	referenceSha: string;
+	dependency?: ReleaseDependency;
 }
 
 export interface ReleaseCatalog {
@@ -15,7 +22,7 @@ export interface ReleaseCatalog {
 	releases: StoredRelease[];
 }
 
-export const REPORT_SCHEMA_VERSION = 5;
+export const REPORT_SCHEMA_VERSION = 6;
 
 export type ChangeStatus = 'added' | 'modified' | 'removed';
 export type ChangeKind = 'policy' | 'initiative' | 'assignment' | 'archetype' | 'architecture' | 'role' | 'configuration' | 'documentation';
@@ -60,7 +67,7 @@ export interface ReleaseChange {
 
 export interface ComparisonReport {
 	schemaVersion: number;
-	scope: 'platform/alz/';
+	scope: LibraryScope;
 	complete: boolean;
 	generatedAt: string;
 	from: { tag: string; version: string; sha: string; url: string };
@@ -80,6 +87,8 @@ export interface ComparisonJobMessage {
 	toTag: string;
 	fromSha: string;
 	toSha: string;
+	fromDependencySha?: string;
+	toDependencySha?: string;
 }
 
 export interface ComparisonJob {

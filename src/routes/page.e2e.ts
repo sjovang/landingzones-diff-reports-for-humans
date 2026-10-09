@@ -4,9 +4,13 @@ const releases = [
 	{ tag: 'platform/alz/2026.10.0', version: '2026.10.0', url: 'https://github.com/Azure/Azure-Landing-Zones-Library/tree/platform/alz/2026.10.0' },
 	{ tag: 'platform/alz/2025.10.0', version: '2025.10.0', url: 'https://github.com/Azure/Azure-Landing-Zones-Library/tree/platform/alz/2025.10.0' }
 ];
+const slzReleases = [
+	...releases.map((release) => ({ ...release, tag: release.tag.replace('/alz/', '/slz/') })),
+	{ tag: 'platform/slz/2024.10.0', version: '2024.10.0', url: 'https://github.com/Azure/Azure-Landing-Zones-Library/tree/platform/slz/2024.10.0' }
+];
 
 const report = {
-	schemaVersion: 5,
+	schemaVersion: 6,
 	scope: 'platform/alz/',
 	complete: true,
 	generatedAt: '2026-01-12T14:00:00.000Z',
@@ -83,7 +87,7 @@ test('explains policy versions, effects, and scopes with source links instead of
 	const introSpacing = await page.evaluate(() => {
 		const intro = document.querySelector('.intro')!.getBoundingClientRect();
 		const navigation = document.querySelector('.topbar')!.getBoundingClientRect();
-		const pickers = document.querySelector('.comparison-form')!.getBoundingClientRect();
+		const pickers = document.querySelector('.comparison-controls')!.getBoundingClientRect();
 		return { above: intro.top - navigation.bottom, below: pickers.top - intro.bottom };
 	});
 	expect(introSpacing.above).toBe(introSpacing.below);
@@ -446,6 +450,125 @@ test('rejects malformed reports without rendering a broken result', async ({ pag
 	await expect(page.getByRole('alert')).toContainText('invalid report');
 	await expect(page.locator('.report')).toHaveCount(0);
 	await awaitCompareButton(page);
+});
+
+test('switches libraries, clears the report, and remembers separate pairs across reloads', async ({ page }, testInfo) => {
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases: [...releases, ...slzReleases] } }));
+	await page.route('**/api/comparisons', (route) => {
+		const pair = route.request().postDataJSON();
+		expect(pair.fromTag.split('/')[1]).toBe(pair.toTag.split('/')[1]);
+		const stream = pair.fromTag.includes('/slz/') ? slzReleases : releases;
+		return route.fulfill({ json: { status: 'completed', report: {
+			...report, scope: pair.fromTag.includes('/slz/') ? 'platform/slz/' : 'platform/alz/',
+			from: { ...stream.find((release) => release.tag === pair.fromTag), sha: 'b'.repeat(40) },
+			to: { ...stream.find((release) => release.tag === pair.toTag), sha: 'a'.repeat(40) },
+			coverage: { ...report.coverage, explanation: 'SLZ includes relevant inherited definitions from pinned ALZ dependencies.' }
+		} } });
+	});
+	await page.goto('/');
+	await expect(page.getByRole('radio', { name: 'ALZ', exact: true })).toBeChecked();
+	await expect(page.locator('.intro')).toContainText('Azure Landing Zones (ALZ)');
+	await expect(page.locator('.intro')).toContainText('Sovereign Landing Zone (SLZ)');
+	await page.getByRole('button', { name: 'Compare releases' }).click();
+	await expect(page.locator('.report')).toBeVisible();
+	await page.getByRole('radio', { name: 'SLZ', exact: true }).check();
+	await expect(page.locator('.report')).toHaveCount(0);
+	await expect(page).toHaveTitle('SLZ Release Brief');
+	await expect(page.getByRole('heading', { name: 'SLZ release changes, explained' })).toBeVisible();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[1].tag);
+	expect(await page.locator('.release-picker option').evaluateAll((options) =>
+		options.every((option) => option instanceof HTMLOptionElement && option.value.startsWith('platform/slz/')))).toBe(true);
+	await page.getByLabel(/FROM Release/).selectOption(slzReleases[2].tag);
+	await page.getByRole('radio', { name: 'ALZ', exact: true }).check();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(releases[1].tag);
+	await page.getByRole('radio', { name: 'SLZ', exact: true }).check();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[2].tag);
+	await page.reload();
+	await expect(page.getByRole('radio', { name: 'SLZ', exact: true })).toBeChecked();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[2].tag);
+	await page.getByRole('button', { name: 'Compare releases' }).click();
+	await expect(page.locator('.dependency-note')).toContainText('pinned ALZ');
+	await expect(page).toHaveURL(/library=slz/);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	const switchBounds = (await page.locator('.library-switch').boundingBox())!;
+	const pickerBounds = (await page.locator('.comparison-form').boundingBox())!;
+	expect(switchBounds.y + switchBounds.height).toBeLessThan(pickerBounds.y);
+	expect(await page.locator('.library-switch label').evaluateAll((labels) =>
+		labels.every((label) => label.getBoundingClientRect().height >= 44))).toBe(true);
+	await page.screenshot({ path: testInfo.outputPath('slz.png'), fullPage: true });
+});
+
+test('restores legacy SLZ links and rejects mixed-library or mismatched links', async ({ page }) => {
+	let comparisons = 0;
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases: [...releases, ...slzReleases] } }));
+	await page.route('**/api/comparisons', (route) => {
+		comparisons++;
+		return route.fulfill({ json: { status: 'completed', report: { ...report, scope: 'platform/slz/',
+			from: { ...slzReleases[1], sha: 'b'.repeat(40) }, to: { ...slzReleases[0], sha: 'a'.repeat(40) }
+		} } });
+	});
+	await page.goto(`/?from=${encodeURIComponent(slzReleases[1].tag)}&to=${encodeURIComponent(slzReleases[0].tag)}`);
+	await expect(page.getByRole('radio', { name: 'SLZ', exact: true })).toBeChecked();
+	await expect(page.locator('.report')).toBeVisible();
+	expect(comparisons).toBe(1);
+	for (const query of [
+		`from=${encodeURIComponent(slzReleases[1].tag)}&to=${encodeURIComponent(releases[0].tag)}`,
+		`library=alz&from=${encodeURIComponent(slzReleases[1].tag)}&to=${encodeURIComponent(slzReleases[0].tag)}`,
+		'library=unknown'
+	]) {
+		await page.goto(`/?${query}`);
+		await expect(page.getByRole('alert')).toContainText('comparison link');
+		await expect(page.locator('.report')).toHaveCount(0);
+	}
+	expect(comparisons).toBe(1);
+});
+
+test('supports keyboard library selection and explicit unavailable and single-release states', async ({ page }) => {
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases } }));
+	await page.goto('/');
+	const alz = page.getByRole('radio', { name: 'ALZ', exact: true });
+	await alz.focus();
+	await page.keyboard.press('ArrowRight');
+	await expect(page.getByRole('radio', { name: 'SLZ', exact: true })).toBeChecked();
+	await expect(page.getByRole('button', { name: 'Compare releases' })).toBeDisabled();
+	await expect(page.getByText('No SLZ releases are in the synchronized catalog.', { exact: false })).toBeVisible();
+	await page.unroute('**/api/releases');
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases: [slzReleases[0]] } }));
+	await page.reload();
+	await expect(page.getByText('At least two SLZ releases are needed for a comparison.')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Compare releases' })).toBeDisabled();
+});
+
+test('rejects a report from the wrong library and disables switching while a job is pending', async ({ page }) => {
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases: [...releases, ...slzReleases] } }));
+	await page.route('**/api/comparisons', (route) => route.fulfill({ json: { status: 'queued', jobId: 'slz-job' } }));
+	await page.route('**/api/comparisons/slz-job', (route) =>
+		route.fulfill({ json: { status: 'completed', report } }));
+	await page.goto('/?library=slz');
+	await page.getByRole('button', { name: 'Compare releases' }).click();
+	await expect(page.getByRole('radio', { name: 'ALZ', exact: true })).toBeDisabled();
+	await expect(page.getByRole('alert')).toContainText('invalid report');
+	await expect(page.locator('.report')).toHaveCount(0);
+	await expect(page.getByRole('radio', { name: 'ALZ', exact: true })).toBeEnabled();
+});
+
+test('recovers unavailable saved pairs and retains selections in memory when browser storage is blocked', async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('release-brief-pairs-v1', JSON.stringify({
+		slz: { fromTag: 'platform/slz/1900.0.0', toTag: 'platform/slz/1901.0.0' }
+	})));
+	await page.route('**/api/releases', (route) => route.fulfill({ json: { releases: [...releases, ...slzReleases] } }));
+	await page.goto('/?library=slz');
+	await expect(page.getByText('Your saved SLZ releases are no longer available.', { exact: false })).toBeVisible();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[1].tag);
+	await page.evaluate(() => Object.defineProperty(window, 'localStorage', {
+		configurable: true, get() { throw new DOMException('Storage blocked', 'SecurityError'); }
+	}));
+	await page.getByLabel(/FROM Release/).selectOption(slzReleases[2].tag);
+	await expect(page.getByText('Your browser could not save release selections.', { exact: false })).toBeVisible();
+	await page.getByRole('radio', { name: 'ALZ', exact: true }).check();
+	await page.getByRole('radio', { name: 'SLZ', exact: true }).check();
+	await expect(page.getByLabel(/FROM Release/)).toHaveValue(slzReleases[2].tag);
+	await expect(page.getByText('Your browser could not save release selections.', { exact: false })).toBeVisible();
 });
 
 test('adapts reports across narrow, tablet, landscape, and wide viewports', async ({ page }) => {

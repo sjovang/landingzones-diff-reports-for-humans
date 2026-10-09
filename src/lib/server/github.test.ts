@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { discoverAlzReleases, isAlzTag } from './github.js';
+import { discoverAlzReleases, discoverReleases, discoverSlzDependency, isAlzTag } from './github.js';
+import { libraryForTag } from '../libraries.js';
 
 const currentSha = 'a'.repeat(40);
 const previousSha = 'b'.repeat(40);
@@ -17,6 +18,36 @@ describe('scheduled ALZ release discovery', () => {
 		expect(isAlzTag('platform/alz/v2.3.4-rc.1')).toBe(true);
 		expect(isAlzTag('platform/slz/2026.10.0')).toBe(false);
 		expect(isAlzTag('platform/alz/not-a-version')).toBe(false);
+	});
+
+	describe('SLZ discovery', () => {
+		it('accepts SLZ versions and independently sorts only the selected stream', async () => {
+			vi.stubGlobal('fetch', vi.fn(async () => Response.json([
+				reference('platform/slz/1.1.0', previousSha),
+				reference('platform/alz/9.0.0', currentSha),
+				reference('platform/slz/2.0.0', currentSha),
+				reference('platform/slz/main', currentSha)
+			])));
+			expect(libraryForTag('platform/slz/2024.07.02')).toBe('slz');
+			expect(libraryForTag('platform/amba/1.0.0')).toBeNull();
+			expect(libraryForTag('platform/slz/1.0.0/../alz')).toBeNull();
+			expect((await discoverReleases('slz')).map((release) => release.tag))
+				.toEqual(['platform/slz/2.0.0', 'platform/slz/1.1.0']);
+		});
+
+		it('reads metadata at the immutable SLZ commit and rejects unsupported dependencies', async () => {
+			const release = { tag: 'platform/slz/1.0.0', version: '1.0.0', sha: currentSha, referenceSha: currentSha, url: '' };
+			const fetchMock = vi.fn(async () => Response.json({ encoding: 'base64',
+				content: Buffer.from(JSON.stringify({ dependencies: [{ path: 'platform/alz', ref: '2024.07.02' }] })).toString('base64') }));
+			vi.stubGlobal('fetch', fetchMock);
+			expect(await discoverSlzDependency(release)).toBe('platform/alz/2024.07.02');
+			expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`ref=${currentSha}`), expect.any(Object));
+			for (const dependencies of [[], [{ path: 'platform/amba', ref: '1.0.0' }], [{ path: 'platform/alz', ref: 'main' }]]) {
+				fetchMock.mockImplementation(async () => Response.json({ encoding: 'base64',
+					content: Buffer.from(JSON.stringify({ dependencies })).toString('base64') }));
+				await expect(discoverSlzDependency(release)).rejects.toMatchObject({ status: 502 });
+			}
+		});
 	});
 
 	it('obtains commit SHAs directly from the tag listing without redundant per-tag requests', async () => {

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from './errors.js';
-import { resolveStoredAlzReleases } from './release-catalog.js';
+import { resolveStoredReleases } from './release-catalog.js';
+import { libraryForTag, libraryScope } from '../libraries.js';
 import {
 	createQueuedRecords,
 	createJobRecord,
@@ -17,9 +18,11 @@ import { REPORT_SCHEMA_VERSION, type ComparisonJob, type ComparisonJobMessage } 
 const REPOSITORY_ID = 'Azure/Azure-Landing-Zones-Library';
 
 export async function requestComparison(fromTag: unknown, toTag: unknown): Promise<ComparisonJob> {
-	const { from, to } = await resolveStoredAlzReleases(fromTag, toTag);
+	const { from, to } = await resolveStoredReleases(fromTag, toTag);
+	const library = libraryForTag(from.tag)!;
 	const cacheKey = createHash('sha256')
-		.update([REPOSITORY_ID, 'platform/alz/', from.sha, to.sha, REPORT_SCHEMA_VERSION].join(':'))
+		.update([REPOSITORY_ID, libraryScope(library), from.tag, to.tag, from.sha, to.sha,
+			from.dependency?.sha ?? '', to.dependency?.sha ?? '', REPORT_SCHEMA_VERSION].join(':'))
 		.digest('hex');
 	const existing = await getCacheEntry(cacheKey);
 
@@ -39,7 +42,9 @@ export async function requestComparison(fromTag: unknown, toTag: unknown): Promi
 		fromTag: from.tag,
 		toTag: to.tag,
 		fromSha: from.sha,
-		toSha: to.sha
+		toSha: to.sha,
+		...(from.dependency ? { fromDependencySha: from.dependency.sha } : {}),
+		...(to.dependency ? { toDependencySha: to.dependency.sha } : {})
 	};
 
 	if (!existing) {
