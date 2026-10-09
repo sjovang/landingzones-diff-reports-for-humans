@@ -9,9 +9,11 @@ interface Entity {
 	name: string;
 	kind: ChangeKind;
 	value: RecordValue;
+	sha: string;
 }
 interface Inventory {
 	entities: Map<string, Entity>;
+	available?: Map<string, Entity>;
 }
 const UPSTREAM = 'https://github.com/Azure/Azure-Landing-Zones-Library';
 
@@ -89,7 +91,7 @@ function kindFor(path: string): ChangeKind {
 	if (path.includes('/role_definitions/')) return 'role';
 	return path.endsWith('.md') ? 'documentation' : 'configuration';
 }
-function inventory(files: ReleaseFiles): Inventory {
+function inventory(files: ReleaseFiles, sha: string): Inventory {
 	const entities = new Map<string, Entity>();
 	for (const [path, content] of files) {
 		if (!path.endsWith('.json')) continue;
@@ -97,7 +99,7 @@ function inventory(files: ReleaseFiles): Inventory {
 		try {
 			value = JSON.parse(content);
 		} catch (error) {
-			console.error('Invalid JSON in ALZ release inventory.', { path, error });
+			console.error('Invalid JSON in library release inventory.', { path, error });
 			throw new AppError(`The release contains invalid JSON in ${path}; policy context cannot be analyzed reliably.`, 502);
 		}
 		if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -108,9 +110,54 @@ function inventory(files: ReleaseFiles): Inventory {
 		const name = text(data.name) ?? path;
 		const id = `${kind}:${name}`;
 		if (entities.has(id)) throw new AppError(`The release contains duplicate ${kind} identity "${name}".`, 502);
-		entities.set(id, { path, name, kind, value: data });
+		entities.set(id, { path, name, kind, value: data, sha });
 	}
 	return { entities };
+}
+
+export interface DependencyContext {
+	files: ReleaseFiles;
+	sha: string;
+}
+
+function effectiveInventory(files: ReleaseFiles, sha: string, dependency?: DependencyContext): Inventory {
+	const own = inventory(files, sha);
+	if (!dependency) return own;
+	const inherited = inventory(dependency.files, dependency.sha);
+	const available = new Map([...inherited.entities, ...own.entities]);
+	const entities = new Map(own.entities);
+	const queue = [...own.entities.values()];
+	const include = (kind: ChangeKind, name: string) => {
+		const id = `${kind}:${name}`;
+		const entity = available.get(id);
+		if (!entity || entities.has(id)) return;
+		entities.set(id, entity);
+		queue.push(entity);
+	};
+	for (let index = 0; index < queue.length; index++) {
+		const entity = queue[index];
+		if (entity.kind === 'architecture') {
+			for (const group of list(entity.value.management_groups)) {
+				for (const name of strings(record(group).archetypes)) include('archetype', name);
+			}
+		} else if (entity.kind === 'archetype') {
+			for (const [key, kind] of [
+				['policy_assignments', 'assignment'], ['policy_definitions', 'policy'],
+				['policy_set_definitions', 'initiative'], ['role_definitions', 'role']
+			] as const) {
+				for (const name of strings(entity.value[key])) include(kind, name);
+			}
+		} else if (entity.kind === 'assignment') {
+			const target = findReference({ entities: available }, properties(entity).policyDefinitionId);
+			if (target) include(target.kind, target.name);
+		} else if (entity.kind === 'initiative') {
+			for (const member of list(properties(entity).policyDefinitions)) {
+				const target = findReference({ entities: available }, record(member).policyDefinitionId);
+				if (target) include(target.kind, target.name);
+			}
+		}
+	}
+	return { entities, available };
 }
 function referenceName(id: unknown): string {
 	return (text(id) ?? '').split('/').at(-1) ?? '';
@@ -222,7 +269,7 @@ function contexts(source: Inventory, entity: Entity, sha: string): PolicyAssignm
 				? policyEffect(target, assignmentParameters(assignment, target))
 				: target?.kind === 'initiative'
 					? 'Multiple policy effects — see the initiative and its member policies'
-					: 'Effect unresolved — referenced definition is not included in this ALZ release';
+					: 'Effect unresolved — referenced definition is not included in this library release';
 		} else if (target?.kind === entity.kind && target.name === entity.name) {
 			if (entity.kind === 'policy') resolvedParameters = assignmentParameters(assignment, entity);
 			effect = entity.kind === 'policy'
@@ -287,9 +334,9 @@ function contexts(source: Inventory, entity: Entity, sha: string): PolicyAssignm
 						`${label(key)}: ${readableValue(record(value).value)}`),
 			notes,
 			sources: [
-				{ label: 'Assignment source', url: sourceLink(sha, assignment.path) },
-				...(target?.kind === 'initiative' ? [{ label: 'Initiative source', url: sourceLink(sha, target.path) }] : []),
-				...scope.evidence.map((item) => ({ label: `${label(item.kind)}: ${item.name}`, url: sourceLink(sha, item.path) }))
+				{ label: 'Assignment source', url: sourceLink(assignment.sha || sha, assignment.path) },
+				...(target?.kind === 'initiative' ? [{ label: 'Initiative source', url: sourceLink(target.sha || sha, target.path) }] : []),
+				...scope.evidence.map((item) => ({ label: `${label(item.kind)}: ${item.name}`, url: sourceLink(item.sha || sha, item.path) }))
 			]
 		});
 	}
@@ -545,10 +592,21 @@ function contextSummary(before: PolicyAssignmentContext[], after: PolicyAssignme
 }
 
 export function analyzeReleases(
-	beforeFiles: ReleaseFiles, afterFiles: ReleaseFiles, fromSha: string, toSha: string
+	beforeFiles: ReleaseFiles, afterFiles: ReleaseFiles, fromSha: string, toSha: string,
+	dependencies?: { before: DependencyContext; after: DependencyContext }
 ): { changes: ReleaseChange[]; sourceFilesChanged: number } {
-	const before = inventory(beforeFiles);
-	const after = inventory(afterFiles);
+	const before = effectiveInventory(beforeFiles, fromSha, dependencies?.before);
+	const after = effectiveInventory(afterFiles, toSha, dependencies?.after);
+	if (dependencies) {
+		for (const entity of [...before.entities.values(), ...after.entities.values()]) {
+			if (entity.kind !== 'policy' && entity.kind !== 'initiative') continue;
+			const id = `${entity.kind}:${entity.name}`;
+			for (const source of [before, after]) {
+				const candidate = source.available?.get(id);
+				if (!source.entities.has(id) && candidate) source.entities.set(id, candidate);
+			}
+		}
+	}
 	const changes: ReleaseChange[] = [];
 	const changedPaths = new Set([...beforeFiles.keys(), ...afterFiles.keys()].filter((path) => beforeFiles.get(path) !== afterFiles.get(path)));
 	for (const id of [...new Set([...before.entities.keys(), ...after.entities.keys()])].sort()) {
@@ -605,10 +663,12 @@ export function analyzeReleases(
 			: contextChanged && previous && current && equal(previous.value, current.value)
 				? contextSummary(assignmentsBefore, assignmentsAfter, entity.kind)
 				: `${kindLabel} updated in this release.`;
+		const previousSha = previous?.sha ?? (entity.path.startsWith('platform/alz/') ? dependencies?.before.sha ?? fromSha : fromSha);
+		const currentSha = current?.sha ?? (entity.path.startsWith('platform/alz/') ? dependencies?.after.sha ?? toSha : toSha);
 		const sources = [
-			...(previous ? [{ label: 'Previous definition', url: sourceLink(fromSha, previous.path) }] : []),
-			...(current ? [{ label: 'New definition', url: sourceLink(toSha, current.path) }] : []),
-			{ label: 'View source changes on GitHub', url: `${UPSTREAM}/compare/${fromSha}...${toSha}#diff-${createHash('sha256').update(entity.path).digest('hex')}` }
+			...(previous ? [{ label: 'Previous definition', url: sourceLink(previous.sha, previous.path) }] : []),
+			...(current ? [{ label: 'New definition', url: sourceLink(current.sha, current.path) }] : []),
+			{ label: 'View source changes on GitHub', url: `${UPSTREAM}/compare/${previousSha}...${currentSha}#diff-${createHash('sha256').update(entity.path).digest('hex')}` }
 		];
 		changes.push({ id, kind: entity.kind, title, status, summary,
 			...(deprecated ? { deprecated: true } : {}),

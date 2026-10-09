@@ -1,15 +1,15 @@
 # Technical overview
 
 ALZ Release Brief compares published releases of the Azure Landing Zones
-Library and produces deterministic reports for the `platform/alz/` library
-configuration. It does not inspect Azure environments or certify that an
-upgrade is safe.
+Library and produces deterministic reports for Azure Landing Zones (ALZ,
+`platform/alz/`) and Sovereign Landing Zone (SLZ, `platform/slz/`). It does not
+inspect Azure environments or certify that an upgrade is safe.
 
 ## Architecture
 
 - **Web app:** SvelteKit and TypeScript with the Node adapter, suitable for Azure App Service.
-- **Release discovery:** An hourly Azure Functions timer discovers ALZ tags through GitHub's API and stores resolved commit SHAs in a durable catalog. Web requests and report jobs read that catalog rather than calling GitHub. The upstream repository is fixed in server code.
-- **Comparison processing:** An Azure Functions Node.js v4 queue trigger consumes `report-jobs` messages and analyzes complete stored `platform/alz/` inventories. This avoids relying on GitHub Compare's 300-file ceiling.
+- **Release discovery:** An hourly Azure Functions timer discovers both ALZ and SLZ tags through GitHub's API and stores resolved commit SHAs and SLZ's pinned ALZ dependency in a durable catalog. Web requests and report jobs read that catalog rather than calling GitHub. The upstream repository is fixed in server code.
+- **Comparison processing:** An Azure Functions Node.js v4 queue trigger consumes `report-jobs` messages and analyzes complete stored inventories for the chosen library, including relevant pinned ALZ context for SLZ. This avoids relying on GitHub Compare's 300-file ceiling.
 - **Durable state:** Azure Queue Storage holds work, Table Storage holds job and cache metadata, and private Blob containers hold report JSON, the release catalog, and content snapshots.
 - **Local services:** Azurite emulates Queue, Blob, and Table Storage.
 
@@ -23,39 +23,61 @@ to the browser.
 ## Release catalog and comparison data
 
 The timer's `RELEASE_SYNC_SCHEDULE` setting is a six-field NCRONTAB expression
-in UTC, defaulting to `0 0 * * * *` (hourly). Each sync lists matching ALZ tags
-with one request. Lightweight tag commits come directly from that listing;
+in UTC, defaulting to `0 0 * * * *` (hourly). Each sync lists matching tags
+with one request per library. Lightweight tag commits come directly from each listing;
 unchanged annotated tags reuse their stored resolution. Catalog updates are
 atomic and guarded by the previous Blob ETag, so concurrent syncs cannot
 overwrite a newer catalog. GitHub errors, incomplete discovery, or snapshot
-warm-up failures retain the last successful catalog.
+warm-up failures retain the last successful catalog. SLZ dependency metadata is
+read at its immutable release commit, reused for unchanged SLZ commits, and
+resolved against the discovered ALZ tags. Missing or unsupported dependencies
+fail synchronization explicitly rather than using the current ALZ release.
 
 `/api/releases` includes `syncedAt`; its contents represent that sync, not a
 live assertion that tags are still published. An empty store returns an
-actionable 503 rather than falling back to GitHub on each request.
+actionable 503 rather than falling back to GitHub on each request. Existing
+ALZ-only `catalog-v1.json` data remains readable; run a successful sync to add
+SLZ and its dependency information.
 
 ALZ contents are stored in `releases/snapshots-v1/<commit-sha>.json` and reused
-across comparison pairs and process restarts. The newest two releases are
-warmed during sync; older releases are fetched by immutable commit via Git and
+across comparison pairs and process restarts. SLZ snapshots use
+`releases/snapshots-v2/slz/<commit-sha>.json`; a shared commit cannot collide
+with an ALZ snapshot. The newest two releases of each library and their pinned
+dependencies are warmed during sync; older releases are fetched by immutable commit via Git and
 stored when first compared. Concurrent requests in one process share that
 fetch; independent worker instances may fetch the same missing snapshot
 concurrently, but conditional Blob creation prevents replacement. Comparison
 generation makes no GitHub REST calls. Moved or removed tags are reflected
 after the next successful sync; a queued comparison fails explicitly if its
-selected tags no longer match the catalog. Existing completed reports remain
-available by job ID.
+selected tags or dependency commits no longer match the catalog. Compatible
+completed reports remain available by job ID.
 
-Completed reports are reused by repository, ALZ path, commit SHAs, and report
-schema version. Report schema version 5 is part of the cache key, so older
-reports (including those missing deprecation-only classification) are not
+Completed reports are reused by repository, library scope, selected tags,
+commit SHAs, pinned dependency SHAs, and report schema version. Report schema
+version 6 is part of the cache key, so older reports are not
 reused. Polling an old job returns an explicit instruction to start a new
 comparison rather than serving an incompatible report.
+
+The ALZ/SLZ radio selector filters both release pickers. ALZ is the default;
+each library initially selects its newest two releases and remembers subsequent
+selections separately in browser-local storage. Switching clears report and job
+state. URLs store the library and pair; legacy links infer the library from
+their tags. Mixed-library and mismatched links are rejected explicitly.
+
+For SLZ, compose entities by kind/name with SLZ definitions taking precedence
+over the pinned ALZ dependency. Start with SLZ-owned entities and follow its
+architectures to archetypes, assignments, initiatives, and policies. Inherited
+policies and initiatives relevant on either side are compared on both sides;
+unrelated ALZ changes and architectures are not imported. Evidence carries
+each entity's source commit. Source-file counts cover SLZ files only, whereas
+semantic totals also include relevant inherited changes. Unavailable built-in
+definitions remain explicitly unresolved.
 
 ## Change evaluation and display rules
 
 This is the current implemented behavior of ALZ Release Brief, not a proposed
 ideal model. Use the rule IDs below when discussing changes to classification,
-wording, visibility, and ordering. Report schema: **5**.
+wording, visibility, and ordering. Report schema: **6**.
 
 Analysis is deterministic; report explanations are not generated by AI.
 
@@ -63,7 +85,7 @@ Analysis is deterministic; report explanations are not generated by AI.
 
 | Layer | Responsibility | Main implementation |
 | --- | --- | --- |
-| Source selection | Resolve two release tags to immutable commits and retrieve complete ALZ inventories | [release-catalog.ts](../src/lib/server/release-catalog.ts), [git-report.ts](../src/lib/server/git-report.ts) |
+| Source selection | Resolve two same-library release tags to immutable commits and retrieve scoped inventories and pinned dependencies | [release-catalog.ts](../src/lib/server/release-catalog.ts), [git-report.ts](../src/lib/server/git-report.ts) |
 | Evaluation | Identify entities and changes; resolve assignment context; produce facts, warnings, and a summary | [analysis.ts](../src/lib/server/analysis.ts) |
 | Report contract | Carry status, deprecation flags, versions, facts, warnings, and assignment context | [types.ts](../src/lib/types.ts) |
 | Assignment presentation | Compare paired assignment fields for concise before/after display | [assignment-changes.ts](../src/lib/assignment-changes.ts) |
@@ -77,7 +99,7 @@ is an evaluation change and affects cached report contents.
 
 | ID | Current rule | Consequence |
 | --- | --- | --- |
-| E01 | Compare only `platform/alz/` in the fixed upstream `Azure/Azure-Landing-Zones-Library`. Any two distinct catalog releases may be selected; chronological ordering is not required. | SLZ and AMBA are excluded. “Before” and “after” follow the chosen direction, even for a reverse comparison. |
+| E01 | Compare `platform/alz/` or `platform/slz/` in the fixed upstream `Azure/Azure-Landing-Zones-Library`. Two distinct catalog releases must belong to the same library; chronological ordering is not required. SLZ includes relevant inherited definitions from its pinned ALZ dependencies. | Cross-library comparisons and AMBA are excluded. “Before” and “after” follow the chosen direction, even for a reverse comparison. |
 | E02 | Analyze both complete inventories, not only changed files or the GitHub comparison view. | Unchanged policies can appear because their assignments changed. GitHub comparison display limits do not limit evaluation. |
 | E03 | Parse every `.json` file as an object. Identity is `kind:name`; missing `name` falls back to the file path. Kind comes from the containing directory. | A named entity can retain identity when relocated. A renamed entity is generally a removal and addition, not a detected rename. |
 | E04 | Invalid JSON, non-object JSON, or duplicate identity within one inventory fails the comparison explicitly. | No partial, success-shaped report is produced for these failures. |

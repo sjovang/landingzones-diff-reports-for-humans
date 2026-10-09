@@ -4,7 +4,8 @@
 	import { page } from '$app/state';
 	import brandIcon from '#lib/assets/favicon.svg';
 	import { assignmentChanges } from '../lib/assignment-changes.js';
-	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type AlzRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext, type ReleaseChange } from '../lib/types.js';
+	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type LibraryRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext, type ReleaseChange } from '../lib/types.js';
+	import { LIBRARIES, isLibrary, libraryForTag, libraryScope, type Library } from '../lib/libraries.js';
 
 	type ChangeFilter = 'added' | 'modified' | 'deprecated' | 'removed';
 
@@ -17,7 +18,15 @@
 				&& JSON.stringify(assignmentContextFacts(candidate)) === JSON.stringify(assignmentContextFacts(assignment))));
 	}
 
-	let releases = $state<AlzRelease[]>([]);
+	let allReleases = $state<LibraryRelease[]>([]);
+	let selectedLibrary = $state<Library>('alz');
+	const releases = $derived(allReleases.filter((release) => libraryForTag(release.tag) === selectedLibrary));
+	const libraryLabel = $derived(selectedLibrary.toUpperCase());
+	type ReleasePair = { fromTag: string; toTag: string };
+	const preferenceKey = 'release-brief-pairs-v1';
+	let savedPairs: Partial<Record<Library, ReleasePair>> = {};
+	let preferenceNotice = $state('');
+	let linkError = '';
 	let fromTag = $state('');
 	let toTag = $state('');
 	let report = $state<ComparisonReport | null>(null);
@@ -92,12 +101,87 @@
 	onMount(() => {
 		const params = new URL(window.location.href).searchParams;
 		restoreComparison = params.has('from') || params.has('to');
+		const requestedLibrary = params.get('library');
+		const inferredLibrary = libraryForTag(params.get('from')) ?? libraryForTag(params.get('to'));
+		if (requestedLibrary !== null && !isLibrary(requestedLibrary)) {
+			linkError = 'This comparison link has an unknown library. Choose ALZ or SLZ and compare again.';
+		}
+		selectedLibrary = isLibrary(requestedLibrary) ? requestedLibrary : inferredLibrary ?? 'alz';
+		try {
+			const saved: unknown = JSON.parse(localStorage.getItem(preferenceKey) ?? '{}');
+			if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('Invalid saved release pairs.');
+			for (const library of LIBRARIES) {
+				if (!(library in saved)) continue;
+				const pair: unknown = Object.entries(saved).find(([key]) => key === library)?.[1];
+				if (!pair || typeof pair !== 'object' || !('fromTag' in pair) || !('toTag' in pair)
+					|| typeof pair.fromTag !== 'string' || typeof pair.toTag !== 'string'
+					|| libraryForTag(pair.fromTag) !== library || libraryForTag(pair.toTag) !== library) {
+					throw new Error('Invalid saved release pair.');
+				}
+				savedPairs[library] = { fromTag: pair.fromTag, toTag: pair.toTag };
+			}
+		} catch (error) {
+			console.warn('Release selection preferences could not be loaded.', error);
+			preferenceNotice = 'Saved release selections could not be loaded. Selections will still be remembered while this page is open.';
+		}
 		void loadReleases();
 		return () => {
 			disposed = true;
 			lifecycle.abort();
 		};
 	});
+
+	function rememberSelection() {
+		if (!fromTag || !toTag) return;
+		savedPairs[selectedLibrary] = { fromTag, toTag };
+		try {
+			localStorage.setItem(preferenceKey, JSON.stringify(savedPairs));
+		} catch (error) {
+			console.warn('Release selection preferences could not be saved.', error);
+			preferenceNotice = 'Your browser could not save release selections. They will be remembered while this page is open.';
+		}
+	}
+
+	function restoreSelection() {
+		const saved = savedPairs[selectedLibrary];
+		if (saved && releases.some((release) => release.tag === saved.fromTag)
+			&& releases.some((release) => release.tag === saved.toTag)) {
+			fromTag = saved.fromTag;
+			toTag = saved.toTag;
+		} else {
+			fromTag = releases[1]?.tag ?? releases[0]?.tag ?? '';
+			toTag = releases[0]?.tag ?? '';
+			if (saved) preferenceNotice = `Your saved ${libraryLabel} releases are no longer available. The newest available releases have been selected.`;
+		}
+	}
+
+	function switchLibrary(library: Library) {
+		if (submitting || selectedLibrary === library) return;
+		preferenceNotice = '';
+		rememberSelection();
+		selectedLibrary = library;
+		restoreSelection();
+		report = null;
+		expandedChanges = {};
+		pendingJob = null;
+		jobStatus = null;
+		pageError = '';
+		linkError = '';
+		restoreComparison = false;
+		clearFilters();
+		announcement = `${libraryLabel} selected. Choose two releases to compare.`;
+		const url = new URL(window.location.href);
+		url.searchParams.set('library', library);
+		url.searchParams.delete('from');
+		url.searchParams.delete('to');
+		replaceState(url, page.state);
+	}
+
+	function selectRelease(side: 'from' | 'to', tag: string) {
+		if (side === 'from') fromTag = tag;
+		else toTag = tag;
+		rememberSelection();
+	}
 
 	async function requestApi(url: string, options: RequestInit = {}) {
 		const timeout = new AbortController();
@@ -161,6 +245,8 @@
 				&& typeof assignment.enforcement === 'string' && validStrings(assignment.scopes)
 				&& validStrings(assignment.parameters) && validStrings(assignment.notes) && validSources(assignment.sources));
 		if (result.schemaVersion !== REPORT_SCHEMA_VERSION || !result.from || !result.to
+			|| result.scope !== libraryScope(selectedLibrary)
+			|| result.from.tag !== fromTag || result.to.tag !== toTag
 			|| typeof result.from.version !== 'string' || typeof result.to.version !== 'string'
 			|| typeof result.from.url !== 'string' || typeof result.to.url !== 'string'
 			|| typeof result.summary !== 'string' || typeof result.complete !== 'boolean'
@@ -184,13 +270,18 @@
 		loadingReleases = true;
 		pageError = '';
 		try {
-			const payload = await requestApi('/api/releases') as { releases?: AlzRelease[]; syncedAt?: string };
+			const payload = await requestApi('/api/releases') as { releases?: LibraryRelease[]; syncedAt?: string };
 			if (!Array.isArray(payload.releases) || !payload.releases.every((release) =>
-				release && typeof release.tag === 'string' && typeof release.version === 'string' && typeof release.url === 'string')
+				release && libraryForTag(release.tag) && typeof release.version === 'string' && typeof release.url === 'string')
 				|| (payload.syncedAt !== undefined && (typeof payload.syncedAt !== 'string' || !Number.isFinite(Date.parse(payload.syncedAt))))) {
 				throw new Error('The server returned an invalid release catalog. Try loading releases again.');
 			}
-			releases = payload.releases;
+			allReleases = payload.releases;
+			if (linkError) {
+				restoreComparison = false;
+				restoreSelection();
+				throw new Error(linkError);
+			}
 			if (restoreComparison) {
 				const params = new URL(window.location.href).searchParams;
 				const savedFrom = params.get('from');
@@ -199,17 +290,14 @@
 					|| !releases.some((release) => release.tag === savedFrom)
 					|| !releases.some((release) => release.tag === savedTo)) {
 					restoreComparison = false;
-					if (releases.length >= 2) {
-						fromTag = releases[1].tag;
-						toTag = releases[0].tag;
-					}
-					throw new Error('This comparison link needs two different available ALZ releases. Choose releases and compare again.');
+					restoreSelection();
+					throw new Error(`This comparison link needs two different available ${libraryLabel} releases from the same library. Choose releases and compare again.`);
 				}
 				fromTag = savedFrom;
 				toTag = savedTo;
-			} else if (releases.length >= 2) {
-				if (!releases.some((release) => release.tag === fromTag)) fromTag = releases[1].tag;
-				if (!releases.some((release) => release.tag === toTag)) toTag = releases[0].tag;
+				rememberSelection();
+			} else {
+				restoreSelection();
 			}
 		} catch (error) {
 			if (!disposed) pageError = error instanceof Error ? error.message : 'Release information could not be loaded.';
@@ -224,16 +312,23 @@
 
 	async function compareReleases() {
 		if (!fromTag || !toTag || fromTag === toTag || submitting) return;
+		if (libraryForTag(fromTag) !== selectedLibrary || libraryForTag(toTag) !== selectedLibrary) {
+			pageError = 'Choose two releases from the selected library.';
+			return;
+		}
+		rememberSelection();
 		submitting = true;
 		report = null;
 		expandedChanges = {};
 		jobStatus = null;
 		pageError = '';
+		linkError = '';
 		announcement = '';
 		clearFilters();
 
 		try {
 			const url = new URL(window.location.href);
+			url.searchParams.set('library', selectedLibrary);
 			url.searchParams.set('from', fromTag);
 			url.searchParams.set('to', toTag);
 			replaceState(url, page.state);
@@ -304,7 +399,7 @@
 </script>
 
 <svelte:head>
-	<title>ALZ Release Brief</title>
+	<title>{libraryLabel} Release Brief</title>
 </svelte:head>
 
 <main class="app-shell">
@@ -312,9 +407,9 @@
 	<div class="sr-only" role="status" aria-label="Comparison status" aria-live="polite" aria-atomic="true">{announcement}</div>
 	<noscript><p class="notice">JavaScript is required to load releases and generate comparisons. Enable JavaScript, then reload this page.</p></noscript>
 	<!--
-	THESIS: Make the ALZ release delta the task, not a dashboard about the task.
+	THESIS: Make the selected library release delta the task, not a dashboard about the task.
 	OWN-WORLD: High-contrast white and cool-gray engineering workspace, cobalt action color, compact system typography, crisp rules, and restrained code treatment.
-	STORY: Engineers choose two published ALZ tags and understand policy versions, behavior, effects, and library assignment scopes, with source evidence one click away.
+	STORY: Engineers choose ALZ or SLZ and two matching published tags, then understand policy versions, behavior, effects, and library assignment scopes, with source evidence one click away.
 	FIRST VIEWPORT: A slim repository header sits above the comparison title and two equal release selectors; the primary Compare releases action anchors their right edge.
 	FORM: Familiar release-comparison interface, chosen from the user's preference; shaped to sit beside GitHub Releases and Azure engineering tools, without an added metaphor.
 	-->
@@ -337,22 +432,33 @@
 	<div class="content">
 		<section class="intro" aria-labelledby="page-title">
 			<div>
-				<h1 id="page-title" tabindex="-1">ALZ release changes, explained</h1>
+				<h1 id="page-title" tabindex="-1">{libraryLabel} release changes, explained</h1>
 				<p>
-					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases. This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
+					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases: Azure Landing Zones (ALZ) or Sovereign Landing Zone (SLZ). This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
 				</p>
 			</div>
 		</section>
 
+		<div class="comparison-controls">
+		<fieldset class="library-switch" disabled={submitting}>
+			<legend class="sr-only">Landing zone library</legend>
+			{#each LIBRARIES as library}
+				<label class:library-selected={selectedLibrary === library}>
+					<input type="radio" name="library" value={library}
+						checked={selectedLibrary === library} onchange={() => switchLibrary(library)} />
+					<span>{library.toUpperCase()}</span>
+				</label>
+			{/each}
+		</fieldset>
 		<section class="comparison-form" aria-label="Release selection">
 			<label class="release-field">
 				<span class="field-label"><span class="sr-only">FROM Release</span><span aria-hidden="true">From release</span></span>
 				<div class="release-picker">
-				<select bind:value={fromTag} aria-describedby="from-release-tag" disabled={loadingReleases || releases.length === 0 || submitting}>
+				<select value={fromTag} onchange={(event) => selectRelease('from', event.currentTarget.value)} aria-describedby="from-release-tag" disabled={loadingReleases || releases.length === 0 || submitting}>
 					{#if loadingReleases}
 						<option value="">Loading published releases…</option>
 					{:else if releases.length === 0}
-						<option value="">No ALZ releases available</option>
+						<option value="">No {libraryLabel} releases available</option>
 					{:else}
 						{#each releases as release (release.tag)}
 							<option value={release.tag}>{release.version}</option>
@@ -373,11 +479,11 @@
 			<label class="release-field">
 				<span class="field-label"><span class="sr-only">TO Release</span><span aria-hidden="true">To release</span></span>
 				<div class="release-picker">
-				<select bind:value={toTag} aria-describedby="to-release-tag" disabled={loadingReleases || releases.length === 0 || submitting}>
+				<select value={toTag} onchange={(event) => selectRelease('to', event.currentTarget.value)} aria-describedby="to-release-tag" disabled={loadingReleases || releases.length === 0 || submitting}>
 					{#if loadingReleases}
 						<option value="">Loading published releases…</option>
 					{:else if releases.length === 0}
-						<option value="">No ALZ releases available</option>
+						<option value="">No {libraryLabel} releases available</option>
 					{:else}
 						{#each releases as release (release.tag)}
 							<option value={release.tag}>{release.version}</option>
@@ -405,6 +511,13 @@
 				{/if}
 			</button>
 		</section>
+		</div>
+		{#if !loadingReleases && !pageError && releases.length < 2}
+			<p class="selection-hint">{releases.length === 0
+				? `No ${libraryLabel} releases are in the synchronized catalog. Run the release sync or wait for the next scheduled sync.`
+				: `At least two ${libraryLabel} releases are needed for a comparison.`}</p>
+		{/if}
+		{#if preferenceNotice}<p class="selection-hint" role="status">{preferenceNotice}</p>{/if}
 		{#if !loadingReleases && releases.length >= 2 && fromTag === toTag}
 			<p class="selection-hint">Choose two different releases to compare.</p>
 		{/if}
@@ -448,6 +561,9 @@
 						Generated <time datetime={report.generatedAt}>{new Date(report.generatedAt).toLocaleString()}</time>
 					</p>
 				</div>
+				{#if report.scope === 'platform/slz/'}
+					<p class="dependency-note">{report.coverage.explanation}</p>
+				{/if}
 				{#if !report.complete}
 					<div class="notice coverage-warning" role="status">
 						<div>
@@ -759,6 +875,15 @@
 	.intro p { max-width: 620px; margin: 16px auto 0; color: #53657b; font-size: 16px; }
 	.intro a { color: #315e91; text-decoration: underline; text-underline-offset: 3px; }
 	.intro a:hover { color: #145bc0; }
+	.library-switch { display: flex; width: fit-content; gap: 4px; margin: 0 auto 18px; padding: 3px; border: 1px solid #c5d0de; border-radius: 6px; background: #edf4fc; }
+	.library-switch label { position: relative; display: flex; min-width: 96px; min-height: 44px; align-items: center; justify-content: center; border-radius: 3px; color: #52647b; font-size: 15px; font-weight: 650; cursor: pointer; }
+	.library-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
+	.library-switch label:hover { background: #fff; color: #192639; }
+	.library-switch .library-selected, .library-switch .library-selected:hover { background: #1768d2; color: #fff; }
+	.library-switch label:has(input:focus-visible) { outline: 3px solid #1768d2; outline-offset: 2px; }
+	.library-switch:disabled { opacity: 0.65; }
+	.library-switch:disabled label { cursor: not-allowed; }
+	.dependency-note { margin-top: 12px; color: #52647b; font-size: 13px; line-height: 1.5; }
 	.comparison-form {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) auto;

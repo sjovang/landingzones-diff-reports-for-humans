@@ -4,7 +4,7 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { REPORT_SCHEMA_VERSION, type ComparisonJob, type ComparisonJobMessage, type ComparisonReport, type ComparisonStatus, type ReleaseCatalog, type StoredRelease } from '../types.js';
 import { AppError } from './errors.js';
-import { isAlzTag } from './github.js';
+import { libraryForTag, libraryScope, type Library } from '../libraries.js';
 
 const JOBS_TABLE = 'ComparisonJobs';
 const CACHE_TABLE = 'ComparisonCache';
@@ -237,7 +237,14 @@ async function releaseContainer() {
 function isStoredRelease(value: unknown): value is StoredRelease {
 	if (!value || typeof value !== 'object') return false;
 	const release = value as Record<string, unknown>;
-	return isAlzTag(release.tag) && typeof release.version === 'string'
+	const library = libraryForTag(release.tag);
+	const dependency = release.dependency;
+	const validDependency = library === 'alz' ? dependency === undefined : (dependency !== null && typeof dependency === 'object'
+		&& 'tag' in dependency && libraryForTag(dependency.tag) === 'alz'
+		&& 'sha' in dependency && typeof dependency.sha === 'string' && /^[0-9a-f]{40}$/i.test(dependency.sha)
+		&& 'version' in dependency && typeof dependency.version === 'string'
+		&& 'url' in dependency && typeof dependency.url === 'string');
+	return Boolean(library) && validDependency && typeof release.version === 'string'
 		&& typeof release.url === 'string' && typeof release.sha === 'string'
 		&& typeof release.referenceSha === 'string'
 		&& /^[0-9a-f]{40}$/i.test(release.sha) && /^[0-9a-f]{40}$/i.test(release.referenceSha);
@@ -278,19 +285,19 @@ export async function saveReleaseCatalog(catalog: ReleaseCatalog, etag?: string)
 	});
 }
 
-function snapshotName(sha: string) {
+function snapshotName(sha: string, library: Library) {
 	if (!/^[0-9a-f]{40}$/i.test(sha)) throw new AppError('Invalid release snapshot commit.', 400);
-	return `snapshots-v1/${sha.toLowerCase()}.json`;
+	return library === 'alz' ? `snapshots-v1/${sha.toLowerCase()}.json` : `snapshots-v2/slz/${sha.toLowerCase()}.json`;
 }
 
-export async function loadReleaseSnapshot(sha: string): Promise<Map<string, string> | null> {
+export async function loadReleaseSnapshot(sha: string, library: Library = 'alz'): Promise<Map<string, string> | null> {
 	try {
-		const blob = (await storageClients()).blobs.getContainerClient(RELEASE_CONTAINER).getBlockBlobClient(snapshotName(sha));
+		const blob = (await storageClients()).blobs.getContainerClient(RELEASE_CONTAINER).getBlockBlobClient(snapshotName(sha, library));
 		const contents = await blob.downloadToBuffer();
 		const entries: unknown = JSON.parse(contents.toString('utf8'));
 		if (!Array.isArray(entries) || entries.length === 0 || !entries.every((entry) =>
 			Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string'
-			&& entry[0].startsWith('platform/alz/') && typeof entry[1] === 'string')
+			&& entry[0].startsWith(libraryScope(library)) && typeof entry[1] === 'string')
 			|| new Set(entries.map((entry) => entry[0])).size !== entries.length) {
 			throw new AppError('Stored release snapshot is invalid. Source context cannot be analyzed reliably.', 503);
 		}
@@ -301,8 +308,8 @@ export async function loadReleaseSnapshot(sha: string): Promise<Map<string, stri
 	}
 }
 
-export async function saveReleaseSnapshot(sha: string, files: Map<string, string>) {
-	const blob = (await releaseContainer()).getBlockBlobClient(snapshotName(sha));
+export async function saveReleaseSnapshot(sha: string, files: Map<string, string>, library: Library = 'alz') {
+	const blob = (await releaseContainer()).getBlockBlobClient(snapshotName(sha, library));
 	try {
 		await blob.uploadData(Buffer.from(JSON.stringify([...files])), {
 			blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' },

@@ -7,11 +7,11 @@ Requirements: Node.js 22+, Git, and (to run the queue worker) Azure Functions Co
 1. Install packages with `npm install`.
 2. Copy `.env.example` to `.env`.
 3. Start the local storage emulator with `npm run storage:start`.
-4. In another terminal, run `npm run releases:sync` to populate the catalog and cache the newest two releases.
+4. In another terminal, run `npm run releases:sync` to populate both library streams and cache the newest two releases of each and their pinned dependencies.
 5. Start the SvelteKit app with `npm run dev`.
 6. To process comparison jobs and scheduled release syncs locally, copy `local.settings.example.json` to `local.settings.json`, then run `npm run functions:start`.
 
-Azurite listens on its standard Blob, Queue, and Table ports. The local emulator skips API-version validation because current Azure Storage SDKs can send a version newer than Azurite supports; this option affects only the local emulator, not Azure Storage. The `.env` and Functions local settings file are ignored by Git. Page loads read the synchronized ALZ catalog; choosing a pair queues report generation. Completed reports are reused by repository, ALZ path, commit SHAs, and report schema version. Keep the Functions worker running alongside the web app: without it, only already-cached comparisons complete. Queue messages are plain JSON, so `host.json` explicitly sets queue `messageEncoding` to `none` to match the storage SDK producer.
+Azurite listens on its standard Blob, Queue, and Table ports. The local emulator skips API-version validation because current Azure Storage SDKs can send a version newer than Azurite supports; this option affects only the local emulator, not Azure Storage. The `.env` and Functions local settings file are ignored by Git. Page loads read the synchronized ALZ/SLZ catalog; choosing a same-library pair queues report generation. Completed reports are reused by repository, library scope, selected tags, commit SHAs, pinned dependency SHAs, and report schema version. Keep the Functions worker running alongside the web app: without it, only already-cached comparisons complete. Queue messages are plain JSON, so `host.json` explicitly sets queue `messageEncoding` to `none` to match the storage SDK producer.
 
 `npm run dev`, `npm run preview`, and `npm start` load server configuration from
 the optional local `.env` file; environment variables supplied by the host take

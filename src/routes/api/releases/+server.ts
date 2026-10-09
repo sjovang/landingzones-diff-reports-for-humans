@@ -11,6 +11,6 @@ export const GET: RequestHandler = async () => {
 			{ headers: { 'cache-control': 'public, max-age=300' } }
 		);
 	} catch (error) {
-		return apiErrorResponse(error, 'ALZ releases could not be loaded.');
+		return apiErrorResponse(error, 'Library releases could not be loaded.');
 	}
 };

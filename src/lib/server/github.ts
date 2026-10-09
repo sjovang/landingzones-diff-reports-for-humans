@@ -1,10 +1,10 @@
 import { AppError } from './errors.js';
-import type { AlzRelease, StoredRelease } from '../types.js';
+import type { LibraryRelease, StoredRelease } from '../types.js';
+import { libraryForTag, libraryScope, type Library } from '../libraries.js';
 
 const OWNER = 'Azure';
 const REPOSITORY = 'Azure-Landing-Zones-Library';
 const API_BASE = `https://api.github.com/repos/${OWNER}/${REPOSITORY}`;
-const ALZ_TAG_PREFIX = 'platform/alz/';
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
 interface GitReference {
@@ -17,13 +17,13 @@ interface GitTag {
 }
 
 function parseVersion(tag: string) {
-	const version = tag.slice(ALZ_TAG_PREFIX.length);
+	const version = tag.slice(tag.lastIndexOf('/') + 1);
 	const match = VERSION_PATTERN.exec(version);
 	if (!match) return null;
 	return { version, major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]), prerelease: match[4] };
 }
 
-function compareReleases(left: AlzRelease, right: AlzRelease) {
+function compareReleases(left: LibraryRelease, right: LibraryRelease) {
 	const a = parseVersion(left.tag);
 	const b = parseVersion(right.tag);
 	if (!a || !b) return left.tag.localeCompare(right.tag);
@@ -37,7 +37,7 @@ function compareReleases(left: AlzRelease, right: AlzRelease) {
 }
 
 export function isAlzTag(tag: unknown): tag is string {
-	return typeof tag === 'string' && tag.startsWith(ALZ_TAG_PREFIX) && parseVersion(tag) !== null;
+	return libraryForTag(tag) === 'alz';
 }
 
 function releaseUrl(tag: string) {
@@ -71,7 +71,7 @@ async function getJson<T>(url: string): Promise<T> {
 			throw new AppError(`GitHub API rate limit reached.${wait}`, 429);
 		}
 		if (response.status === 404) {
-			throw new AppError('The requested ALZ release tag was not found in the upstream repository.', 404);
+			throw new AppError('The requested library release was not found in the upstream repository.', 404);
 		}
 		throw new AppError(`GitHub returned ${response.status} while reading release data. Try again later.`, 502);
 	}
@@ -80,13 +80,17 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export async function discoverAlzReleases(previous: StoredRelease[] = []): Promise<StoredRelease[]> {
+	return discoverReleases('alz', previous);
+}
+
+export async function discoverReleases(library: Library, previous: StoredRelease[] = []): Promise<StoredRelease[]> {
 	// Matching refs returns all matches; this endpoint does not support pagination.
-	const references = await getJson<GitReference[]>(`${API_BASE}/git/matching-refs/tags/${ALZ_TAG_PREFIX}`);
+	const references = await getJson<GitReference[]>(`${API_BASE}/git/matching-refs/tags/${libraryScope(library)}`);
 
 	const releases: StoredRelease[] = [];
 	for (const reference of references) {
 		const tag = reference.ref.replace(/^refs\/tags\//, '');
-		if (!isAlzTag(tag)) continue;
+		if (libraryForTag(tag) !== library) continue;
 		const cached = previous.find((release) => release.tag === tag && release.referenceSha === reference.object.sha);
 		const sha = cached?.sha ?? await resolveReferenceCommit(tag, reference.object);
 		releases.push({ tag, version: parseVersion(tag)!.version, url: releaseUrl(tag), sha, referenceSha: reference.object.sha });
@@ -96,7 +100,7 @@ export async function discoverAlzReleases(previous: StoredRelease[] = []): Promi
 }
 
 async function resolveReferenceCommit(tag: string, reference: GitReference['object']): Promise<string> {
-	if (!isAlzTag(tag)) throw new AppError('Choose a published ALZ release tag.', 400);
+	if (!libraryForTag(tag)) throw new AppError('Choose a published ALZ or SLZ release tag.', 400);
 
 	let object = reference;
 	const seen = new Set<string>();
@@ -114,4 +118,30 @@ async function resolveReferenceCommit(tag: string, reference: GitReference['obje
 		throw new AppError(`The upstream tag ${tag} does not point to a commit.`, 502);
 	}
 	return object.sha.toLowerCase();
+}
+
+export async function discoverSlzDependency(release: StoredRelease): Promise<string> {
+	const file = await getJson<{ content?: string; encoding?: string }>(
+		`${API_BASE}/contents/platform/slz/alz_library_metadata.json?ref=${encodeURIComponent(release.sha)}`);
+	if (file.encoding !== 'base64' || typeof file.content !== 'string') {
+		throw new AppError(`SLZ dependency metadata is unavailable for ${release.tag}.`, 502);
+	}
+	let metadata: unknown;
+	try {
+		metadata = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+	} catch (error) {
+		console.error('Invalid SLZ dependency metadata.', { tag: release.tag, error });
+		throw new AppError(`SLZ dependency metadata is invalid for ${release.tag}.`, 502);
+	}
+	if (!metadata || typeof metadata !== 'object' || !('dependencies' in metadata)
+		|| !Array.isArray(metadata.dependencies) || metadata.dependencies.length !== 1) {
+		throw new AppError(`SLZ release ${release.tag} must declare one pinned ALZ dependency.`, 502);
+	}
+	const dependency: unknown = metadata.dependencies[0];
+	if (!dependency || typeof dependency !== 'object' || !('path' in dependency)
+		|| dependency.path !== 'platform/alz' || !('ref' in dependency)
+		|| typeof dependency.ref !== 'string' || !isAlzTag(`platform/alz/${dependency.ref}`)) {
+		throw new AppError(`SLZ release ${release.tag} has an unsupported ALZ dependency.`, 502);
+	}
+	return `platform/alz/${dependency.ref}`;
 }
