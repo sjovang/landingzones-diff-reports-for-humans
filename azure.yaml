@@ -1,0 +1,20 @@
+name: alzlib-diff-for-humans
+infra:
+  provider: bicep
+  path: infra
+  module: main
+services:
+  web:
+    image: ${WEB_IMAGE}
+    host: appservice
+    docker:
+      imagePassthrough: true
+  worker:
+    project: .
+    dist: .azure-build/functions
+    language: js
+    host: function
+    hooks:
+      prepackage:
+        shell: sh
+        run: npm run package:functions

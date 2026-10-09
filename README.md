@@ -14,3 +14,6 @@ environments or certify upgrade safety.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and development. For
 implementation details and report behavior, see the
 [technical overview](docs/TECHNICAL_OVERVIEW.md).
+
+For local-machine Azure deployment with Azure Developer CLI, see the
+[deployment guide](docs/DEPLOYMENT.md).
