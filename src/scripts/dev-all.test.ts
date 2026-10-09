@@ -36,6 +36,7 @@ async function fixture(options: { blockedStorage?: boolean; failingSync?: boolea
 		source = source.replace(new RegExp(`\\b${port}\\b`, 'g'), String(ports[index]));
 	}
 	await writeFile(join(directory, 'scripts/dev-all.mjs'), source);
+	await writeFile(join(directory, 'scripts/dev-ports.mjs'), await readFile(new URL('../../scripts/dev-ports.mjs', import.meta.url), 'utf8'));
 	await writeFile(join(directory, '.env.example'), 'AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true\n');
 	await writeFile(join(directory, 'local.settings.example.json'), JSON.stringify({
 		IsEncrypted: false, Values: { AzureWebJobsStorage: 'UseDevelopmentStorage=true', FUNCTIONS_WORKER_RUNTIME: 'node' }

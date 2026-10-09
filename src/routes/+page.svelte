@@ -399,7 +399,7 @@
 </script>
 
 <svelte:head>
-	<title>{libraryLabel} Release Brief</title>
+	<title>{libraryLabel} | Landing Zone Release Brief</title>
 </svelte:head>
 
 <main class="app-shell">
@@ -414,9 +414,9 @@
 	FORM: Familiar release-comparison interface, chosen from the user's preference; shaped to sit beside GitHub Releases and Azure engineering tools, without an added metaphor.
 	-->
 	<header class="topbar">
-		<a class="brand" href="/" aria-label="ALZ Release Brief home">
+		<a class="brand" href="/" aria-label="Landing Zone Release Brief home">
 			<img class="brand-mark" src={brandIcon} width="28" height="28" alt="" />
-			<span>ALZ Release Brief</span>
+			<span>Landing Zone Release Brief</span>
 		</a>
 		<a
 			class="repository-link"

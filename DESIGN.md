@@ -1,5 +1,5 @@
 ---
-name: ALZ Release Brief
+name: Landing Zone Release Brief
 description: A restrained, readable interface for source-backed release comparisons.
 colors:
   primary: "#1768d2"
@@ -95,7 +95,7 @@ components:
     height: "32px"
 ---
 
-# Design System: ALZ Release Brief
+# Design System: Landing Zone Release Brief
 
 ## Overview
 
@@ -247,7 +247,7 @@ Disabled release selectors remain visibly distinct.
 
 ### Navigation
 
-A white top bar pairs the ALZ Release Brief name and a cobalt two-release
+A white top bar pairs the Landing Zone Release Brief name and a cobalt two-release
 comparison mark with the app's GitHub
 repository link. Both links have (44px) minimum hit height. On phones, the
 repository name may ellipsize; the destination remains available. A skip link
@@ -283,7 +283,7 @@ Both pickers show only the selected library. Switching clears the report and
 restores that library's last selected pair; the first selection uses the newest
 two releases. The description expands ALZ as Azure Landing Zones and SLZ as
 Sovereign Landing Zone. The heading and browser title reflect the selected
-library while the existing ALZ Release Brief brand remains unchanged.
+library while the Landing Zone Release Brief brand covers both libraries.
 
 Two individually framed release pickers surround a simple direction arrow.
 Sentence-case labels sit beside versions inside compact (54px) pickers; full

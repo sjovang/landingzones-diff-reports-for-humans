@@ -24,10 +24,15 @@ stored snapshots. All process output appears in the same terminal.
 This command uses local Azurite storage (`UseDevelopmentStorage=true`).
 If your existing configuration points elsewhere, use the individual commands
 below instead. Queue names and sync schedules must match between `.env` and
-`local.settings.json`. If ports 10000-10002, 7071, or 5173 are occupied, stop
-your existing dev services first; `dev:all` does not kill or reuse unrelated
-processes. A startup or service failure stops the other processes it started
-and exits with an error.
+`local.settings.json`. If ports 10000-10002, 7071, or 5173 are occupied,
+`dev:all` lists their owners (PID, ports, and command) and asks whether to stop
+them before continuing. The answer defaults to **No**: nothing is stopped
+without confirmation. Check the list carefully because it may include another
+local instance. Processes that do not stop gracefully require a separate
+force-stop confirmation. Non-interactive runs list conflicts and exit without
+stopping them. macOS/Linux require `lsof` and `ps` for port inspection; Windows
+uses PowerShell. A startup or service failure stops the processes launched by
+the command and exits with an error.
 
 ### Running services separately
 
@@ -44,7 +49,8 @@ session without dependencies, run **Setup** first.
 Once all services are ready, the app opens the local instance in its integrated
 browser. Node.js, Git, and Azure Functions Core Tools v4 must already be
 installed on the execution host. Only run one local instance at a time because
-the services use fixed ports. Stop the run script in the app to shut down its
+the services use fixed ports; if a previous instance is still running, review
+the port-conflict prompt in the run terminal. Stop the run script in the app to shut down its
 services. Repository configuration changes must be reviewed and accepted again
 before the app uses them.
 
