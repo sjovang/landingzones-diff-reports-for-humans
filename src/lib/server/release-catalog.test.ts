@@ -68,6 +68,33 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('durable ALZ release catalog', () => {
+	it('hides an already-stored legacy release and rejects comparisons in either direction', async () => {
+		const legacy = { ...releases[0], tag: 'platform/alz/2024.03.01-legacy', version: '2024.03.01-legacy' };
+		vi.mocked(loadReleaseCatalog).mockResolvedValue({
+			...stored, catalog: { ...catalog, releases: [...releases, legacy] }
+		});
+		expect(await getReleaseCatalog()).toEqual(catalog);
+		await expect(requestComparison(legacy.tag, releases[0].tag)).rejects.toMatchObject({ status: 400 });
+		await expect(requestComparison(releases[0].tag, legacy.tag)).rejects.toMatchObject({ status: 400 });
+		expect(enqueueComparison).not.toHaveBeenCalled();
+	});
+
+	it('removes the legacy release from stored catalogs and never restores it on subsequent syncs', async () => {
+		const legacy = { ...releases[0], tag: 'platform/alz/2024.03.01-legacy', version: '2024.03.01-legacy' };
+		vi.mocked(loadReleaseCatalog).mockResolvedValue({
+			...stored, catalog: { ...catalog, releases: [...releases, legacy] }
+		});
+		stubReleaseRefs([...releases, ...slzReleases, legacy]);
+		vi.stubGlobal('fetch', successfulSyncFetch());
+		for (let count = 0; count < 2; count++) {
+			const next = await syncLibraryReleases();
+			expect(next.releases.some((release) => release.tag === legacy.tag)).toBe(false);
+			vi.mocked(loadReleaseCatalog).mockResolvedValue({ catalog: next, etag: stored.etag });
+		}
+		expect(getReleaseSnapshot).not.toHaveBeenCalledWith(legacy);
+		expect(saveReleaseCatalog).toHaveBeenCalledTimes(2);
+	});
+
 	it('serves repeated catalog and release resolution reads without contacting GitHub', async () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);

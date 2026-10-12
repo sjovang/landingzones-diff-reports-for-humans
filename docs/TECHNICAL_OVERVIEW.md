@@ -22,6 +22,12 @@ required.
 
 ## Release catalog and comparison data
 
+The exact ALZ tag `platform/alz/2024.03.01-legacy` is excluded from discovery
+and stored-catalog reads because its upstream snapshot does not match its
+synchronized commit. Existing catalogs cannot expose it, comparisons reject it,
+and subsequent syncs omit it rather than reintroducing it. Other prerelease
+tags remain supported.
+
 The timer's `RELEASE_SYNC_SCHEDULE` setting is a six-field NCRONTAB expression
 in UTC, defaulting to `0 0 * * * *` (hourly). Each sync lists matching tags
 with one request per library. Lightweight tag commits come directly from each listing;

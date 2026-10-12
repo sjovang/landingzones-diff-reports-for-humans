@@ -40,6 +40,23 @@ afterEach(() => {
 });
 
 describe('scheduled ALZ release discovery', () => {
+	it('excludes the legacy tag on every discovery while retaining other prereleases', async () => {
+		vi.mocked(git.getRemoteInfo).mockResolvedValue(remoteInfo([
+			{ tag: 'platform/alz/2024.03.01-legacy', sha: previousSha },
+			{ tag: 'platform/alz/2024.03.01', sha: currentSha },
+			{ tag: 'platform/alz/2024.03.01-rc.1', sha: currentSha }
+		]));
+		const previous = [{
+			tag: 'platform/alz/2024.03.01-legacy', version: '2024.03.01-legacy',
+			sha: previousSha, referenceSha: previousSha, url: ''
+		}];
+		for (let count = 0; count < 2; count++) {
+			expect((await discoverAlzReleases(previous)).map((release) => release.tag)).toEqual([
+				'platform/alz/2024.03.01', 'platform/alz/2024.03.01-rc.1'
+			]);
+		}
+	});
+
 	it('accepts only semantic-version tags in the ALZ stream', () => {
 		expect(isAlzTag('platform/alz/2026.10.0')).toBe(true);
 		expect(isAlzTag('platform/alz/v2.3.4-rc.1')).toBe(true);

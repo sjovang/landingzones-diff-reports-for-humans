@@ -2,6 +2,11 @@ export const LIBRARIES = ['alz', 'slz'] as const;
 export type Library = typeof LIBRARIES[number];
 export type LibraryScope = `platform/${Library}/`;
 
+export function isExcludedReleaseTag(tag: string): boolean {
+	// This legacy tag's upstream snapshot does not match its synchronized commit.
+	return tag === 'platform/alz/2024.03.01-legacy';
+}
+
 export function isLibrary(value: unknown): value is Library {
 	return value === 'alz' || value === 'slz';
 }
