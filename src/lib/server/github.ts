@@ -2,7 +2,7 @@ import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 import { AppError } from './errors.js';
 import type { LibraryRelease, StoredRelease } from '../types.js';
-import { libraryForTag, type Library } from '../libraries.js';
+import { isExcludedReleaseTag, libraryForTag, type Library } from '../libraries.js';
 
 const OWNER = 'Azure';
 const REPOSITORY = 'Azure-Landing-Zones-Library';
@@ -70,7 +70,7 @@ async function getReleaseReferences(library: Library): Promise<GitReference[]> {
 		.map(([tag, sha]) => [tag.slice(0, -3), sha]));
 	const releases: GitReference[] = [];
 	for (const [tag, referenceSha] of tagRefs) {
-		if (tag.endsWith('^{}') || libraryForTag(tag) !== library) continue;
+		if (tag.endsWith('^{}') || libraryForTag(tag) !== library || isExcludedReleaseTag(tag)) continue;
 		const sha = peeledRefs.get(tag) ?? referenceSha;
 		if (!SHA_PATTERN.test(referenceSha) || !SHA_PATTERN.test(sha)) {
 			throw new AppError(`The upstream release tag ${tag} has an invalid commit reference.`, 502);

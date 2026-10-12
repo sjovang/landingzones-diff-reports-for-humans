@@ -1,5 +1,5 @@
 import { discoverReleases, discoverSlzDependency } from './github.js';
-import { LIBRARIES, libraryForTag } from '../libraries.js';
+import { LIBRARIES, isExcludedReleaseTag, libraryForTag } from '../libraries.js';
 import { AppError } from './errors.js';
 import { loadReleaseCatalog, saveReleaseCatalog } from './storage.js';
 import { getReleaseSnapshot } from './git-report.js';
@@ -10,7 +10,10 @@ export async function getReleaseCatalog(): Promise<ReleaseCatalog> {
 	if (!stored) {
 		throw new AppError('Releases have not been synchronized yet. Run the release sync or wait for the scheduled sync.', 503);
 	}
-	return stored.catalog;
+	return {
+		...stored.catalog,
+		releases: stored.catalog.releases.filter((release) => !isExcludedReleaseTag(release.tag))
+	};
 }
 
 export async function resolveStoredReleases(fromTag: unknown, toTag: unknown) {
