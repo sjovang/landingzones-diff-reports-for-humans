@@ -4,7 +4,9 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { REPORT_SCHEMA_VERSION, type ComparisonJob, type ComparisonJobMessage, type ComparisonReport, type ComparisonStatus, type ReleaseCatalog, type StoredRelease } from '../types.js';
 import { AppError } from './errors.js';
-import { libraryForTag, libraryScope, type Library } from '../libraries.js';
+import { isLibrary, libraryForTag, libraryScope, type Library } from '../libraries.js';
+import { createHash } from 'node:crypto';
+import { TIMELINE_SCHEMA_VERSION, isTimelineIdentity, type TimelineIdentity, type TimelineIndex, type TimelineReport } from '../timelines.js';
 
 const JOBS_TABLE = 'ComparisonJobs';
 const CACHE_TABLE = 'ComparisonCache';
@@ -319,4 +321,122 @@ export async function saveReleaseSnapshot(sha: string, files: Map<string, string
 		if ((error as { statusCode?: number }).statusCode !== 412) throw error;
 		// Another worker has already persisted this immutable commit snapshot.
 	}
+}
+
+const TIMELINE_INDEX_BLOB = 'timelines-v1/index.json';
+export const TIMELINE_QUEUE_NAME = 'timeline-jobs';
+
+async function timelineContainer() {
+	const container = (await storageClients()).blobs.getContainerClient(REPORT_CONTAINER);
+	await container.createIfNotExists();
+	return container;
+}
+
+function timelineBlobName(generationId: string, identity: TimelineIdentity) {
+	if (!/^[0-9a-f-]{36}$/i.test(generationId) || !isTimelineIdentity(identity)) {
+		throw new AppError('Invalid timeline identity or generation.', 400);
+	}
+	const key = createHash('sha256').update(JSON.stringify([identity.library, identity.kind, identity.name])).digest('hex');
+	return `timelines-v1/${generationId}/${key}.json`;
+}
+
+export async function loadTimelineIndex(): Promise<{ index: TimelineIndex; etag: string } | null> {
+	try {
+		const blob = (await storageClients()).blobs.getContainerClient(REPORT_CONTAINER).getBlockBlobClient(TIMELINE_INDEX_BLOB);
+		const response = await blob.download();
+		if (!response.readableStreamBody || !response.etag) throw new AppError('Stored timeline index is unreadable. Regenerate timelines.', 503);
+		const chunks: Buffer[] = [];
+		for await (const chunk of response.readableStreamBody) chunks.push(Buffer.from(chunk));
+		const index: TimelineIndex = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+		if (!index || index.schemaVersion !== TIMELINE_SCHEMA_VERSION
+			|| typeof index.generationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(index.generationId)
+			|| typeof index.generatedAt !== 'string' || typeof index.syncedAt !== 'string'
+			|| !Array.isArray(index.gaps) || !index.gaps.every((gap) => gap && isLibrary(gap.library)
+				&& gap.release && libraryForTag(gap.release.tag) === gap.library && typeof gap.reason === 'string')
+			|| !Array.isArray(index.reports) || !index.reports.every((report) =>
+				isTimelineIdentity(report) && typeof report.title === 'string'
+				&& typeof report.firstRelease === 'string' && typeof report.latestRelease === 'string'
+				&& (typeof report.presentInLatest === 'boolean' || report.presentInLatest === null) && typeof report.deprecated === 'boolean'
+				&& typeof report.releaseCount === 'number' && typeof report.changeCount === 'number'
+				&& Number.isInteger(report.gapCount) && report.gapCount >= 0)) {
+			throw new AppError('Stored timeline index is incompatible or invalid. Regenerate timelines.', 503);
+		}
+		return { index, etag: response.etag };
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode === 404) return null;
+		throw error;
+	}
+}
+
+export async function saveTimelineReport(report: TimelineReport) {
+	const blob = (await timelineContainer()).getBlockBlobClient(timelineBlobName(report.generationId, report));
+	await blob.uploadData(Buffer.from(JSON.stringify(report)), {
+		blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' },
+		conditions: { ifNoneMatch: '*' }
+	});
+}
+
+export async function getTimelineIndexEtag(): Promise<string | undefined> {
+	try {
+		const blob = (await storageClients()).blobs.getContainerClient(REPORT_CONTAINER).getBlockBlobClient(TIMELINE_INDEX_BLOB);
+		const properties = await blob.getProperties();
+		if (!properties.etag) throw new AppError('Stored timeline index has no publication version. Check storage and retry.', 503);
+		return properties.etag;
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode === 404) return undefined;
+		throw error;
+	}
+}
+
+export async function publishTimelineIndex(index: TimelineIndex, etag?: string) {
+	const blob = (await timelineContainer()).getBlockBlobClient(TIMELINE_INDEX_BLOB);
+	try {
+		await blob.uploadData(Buffer.from(JSON.stringify(index)), {
+			blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' },
+			conditions: etag ? { ifMatch: etag } : { ifNoneMatch: '*' }
+		});
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode === 412) {
+			throw new AppError('Another timeline generation was published during this run. Its index was retained; retry generation if needed.', 409);
+		}
+		throw error;
+	}
+}
+
+export async function loadTimelineReport(identity: TimelineIdentity): Promise<TimelineReport> {
+	if (!isTimelineIdentity(identity)) throw new AppError('Invalid timeline identity.', 400);
+	const stored = await loadTimelineIndex();
+	if (!stored) throw new AppError('Timelines have not been generated yet. Run npm run timelines:generate or invoke the timeline generation Function.', 503);
+	if (!stored.index.reports.some((report) => report.library === identity.library
+		&& report.kind === identity.kind && report.name === identity.name)) {
+		throw new AppError('This object has no published timeline. Check its identity or regenerate timelines after synchronizing releases.', 404);
+	}
+	try {
+		const blob = (await storageClients()).blobs.getContainerClient(REPORT_CONTAINER)
+			.getBlockBlobClient(timelineBlobName(stored.index.generationId, identity));
+		const report: TimelineReport = JSON.parse((await blob.downloadToBuffer()).toString('utf8'));
+		if (!report || report.schemaVersion !== TIMELINE_SCHEMA_VERSION || report.generationId !== stored.index.generationId
+			|| report.library !== identity.library || report.kind !== identity.kind || report.name !== identity.name
+			|| typeof report.title !== 'string' || !Array.isArray(report.entries) || !report.entries.length
+			|| !Number.isInteger(report.gapCount) || report.gapCount < 0
+			|| (typeof report.presentInLatest !== 'boolean' && report.presentInLatest !== null)
+			|| !report.entries.every((entry) => entry && typeof entry === 'object'
+				&& entry.release && libraryForTag(entry.release.tag) === identity.library
+				&& ['first-observed', 'added', 'reintroduced', 'modified', 'removed', 'unchanged', 'absent', 'gap'].includes(entry.status)
+				&& (entry.status !== 'gap' || typeof entry.gapReason === 'string'))) {
+			throw new AppError('Stored timeline report is incompatible or invalid. Regenerate timelines.', 503);
+		}
+		return report;
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode === 404) {
+			throw new AppError('The published timeline is missing its report. Regenerate timelines.', 503);
+		}
+		throw error;
+	}
+}
+
+export async function enqueueTimelineGeneration(generationId: string) {
+	const queue = (await storageClients()).queue.getQueueClient(TIMELINE_QUEUE_NAME);
+	await queue.createIfNotExists();
+	await queue.sendMessage(JSON.stringify({ generationId }));
 }

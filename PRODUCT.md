@@ -38,6 +38,8 @@ Users compare releases of the Azure Landing Zones Library published at https://g
 - Raw definitions and diffs are secondary evidence linked on GitHub. Missing built-in definitions and unsupported expressions must be identified explicitly, never guessed.
 - The library selector defaults to ALZ and sits above the release pickers. Each library initially selects its newest two published releases, then remembers its last selected pair in browser-local storage. Switching libraries clears the report; shared links restore the chosen library and comparison. Existing ALZ links remain supported.
 - Generated reports are immutable and privately cached without automatic expiry during the prototype; revisit retention before deployment.
+- Object timelines cover policy definitions, policy set definitions, and archetypes in ALZ and SLZ at stable identity-based URLs. A searchable overview includes removed and unchanged objects. Each history shows every release from the newest back to introduction, or explicitly says first observed when present in the earliest catalog release.
+- Timelines are generated separately by a manually invoked Azure Function or npm script, using available cached release snapshots. Missing snapshots or pinned dependencies are explicit coverage gaps, not failures or evidence of absence. Changes are never inferred across gaps; latest presence is unknown if that release is missing. Browsing and comparisons only read or link to published timelines; invalid data, storage failures, or publication conflicts retain the last successful publication.
 
 ## Brand Commitments
 

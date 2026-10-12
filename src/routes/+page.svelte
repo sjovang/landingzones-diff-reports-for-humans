@@ -2,10 +2,11 @@
 	import { onMount } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import brandIcon from '#lib/assets/favicon.svg';
+	import AppHeader from '../lib/AppHeader.svelte';
 	import { assignmentChanges } from '../lib/assignment-changes.js';
 	import { REPORT_SCHEMA_VERSION, assignmentContextFacts, type LibraryRelease, type ComparisonReport, type ComparisonStatus, type PolicyAssignmentContext, type ReleaseChange } from '../lib/types.js';
 	import { LIBRARIES, isLibrary, libraryForTag, libraryScope, type Library } from '../lib/libraries.js';
+	import { isTimelineKind, timelineHref } from '../lib/timelines.js';
 
 	type ChangeFilter = 'added' | 'modified' | 'deprecated' | 'removed';
 
@@ -413,28 +414,14 @@
 	FIRST VIEWPORT: A slim repository header sits above the comparison title and two equal release selectors; the primary Compare releases action anchors their right edge.
 	FORM: Familiar release-comparison interface, chosen from the user's preference; shaped to sit beside GitHub Releases and Azure engineering tools, without an added metaphor.
 	-->
-	<header class="topbar">
-		<a class="brand" href="/" aria-label="Landing Zone Release Brief home">
-			<img class="brand-mark" src={brandIcon} width="28" height="28" alt="" />
-			<span>Landing Zone Release Brief</span>
-		</a>
-		<a
-			class="repository-link"
-			href="https://github.com/sjovang/landingzones-diff-reports-for-humans"
-			target="_blank"
-			rel="noreferrer"
-		>
-			<span class="repository-name">sjovang / landingzones-diff-reports-for-humans</span>
-			<span aria-hidden="true">↗</span>
-		</a>
-	</header>
+	<AppHeader />
 
 	<div class="content">
 		<section class="intro" aria-labelledby="page-title">
 			<div>
 				<h1 id="page-title" tabindex="-1">{libraryLabel} release changes, explained</h1>
 				<p>
-					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases: Azure Landing Zones (ALZ) or Sovereign Landing Zone (SLZ). This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs.
+					Compare two <a href="https://github.com/Azure/azure-landing-zones-library" target="_blank" rel="noreferrer">Azure Landing Zones Library</a> releases: Azure Landing Zones (ALZ) or Sovereign Landing Zone (SLZ). This tool connects changes across policies, initiatives, and assignments to explain what changed, what it does, and where it applies—in plain language, not raw JSON diffs. To follow one definition or archetype across all releases, <a href="/timelines">explore timelines</a>.
 				</p>
 			</div>
 		</section>
@@ -768,6 +755,11 @@
 										<a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
 									{/each}
 								</div>
+								{#if isTimelineKind(change.kind)}
+									<div class="timeline-action">
+										<a href={timelineHref(selectedLibrary, change.kind, change.id.slice(change.kind.length + 1))}>Show timeline →</a>
+									</div>
+								{/if}
 							</div>
 							{/if}
 						</details>
@@ -822,43 +814,9 @@
 	.app-shell { min-height: 100vh; }
 	.skip-link { position: absolute; inset-block-start: 8px; inset-inline-start: 18px; z-index: 1; padding: 10px 14px; background: #fff; color: #175ba9; transform: translateY(-150%); }
 	.skip-link:focus { transform: translateY(0); }
-	.topbar {
-		height: 64px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 0 max(28px, calc((100vw - 1180px) / 2));
-		background: #fff;
-		border-bottom: 1px solid #dce3ed;
-	}
-	.brand {
-		display: inline-flex;
-		flex: none;
-		min-height: 44px;
-		gap: 11px;
-		align-items: center;
-		color: #152338;
-		font-size: 15px;
-		font-weight: 700;
-		text-decoration: none;
-		letter-spacing: -0.02em;
-	}
-	.brand-mark {
-		display: block;
-		width: 28px;
-		height: 28px;
-	}
-	.repository-link {
-		display: inline-flex;
-		min-height: 44px;
-		align-items: center;
-		gap: 8px;
-		color: #52647b;
-		font-size: 13px;
-		text-decoration: none;
-	}
-	.repository-name { min-width: 0; }
-	.repository-link:hover { color: #145bc0; }
+	.timeline-action { margin-top: 18px; padding-top: 18px; border-top: 1px solid #cbd5e1; }
+	.timeline-action a { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 14px; border: 1px solid #c5d0de; border-radius: 5px; color: #175ba9; text-decoration: none; font-size: 14px; font-weight: 650; }
+	.timeline-action a:hover { border-color: #1768d2; background: #edf4fc; }
 	.content { max-width: 1180px; margin: 0 auto; padding: 48px max(28px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left)); }
 	.intro {
 		text-align: center;
@@ -1103,9 +1061,6 @@
 		.search-field input { width: 100%; }
 	}
 	@media (max-width: 650px) {
-		.topbar { min-height: 58px; height: auto; padding: env(safe-area-inset-top) max(18px, env(safe-area-inset-right)) 0 max(18px, env(safe-area-inset-left)); gap: 12px; }
-		.repository-link { max-width: 48%; min-width: 0; font-size: 11px; }
-		.repository-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.content { padding: 32px max(18px, env(safe-area-inset-right)) max(26px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); }
 		.intro { margin-bottom: 32px; }
 		h1 { font-size: 32px; }

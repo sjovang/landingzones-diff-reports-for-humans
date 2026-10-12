@@ -81,7 +81,9 @@ test('explains policy versions, effects, and scopes with source links instead of
 	await expect(page.locator('footer')).toHaveCount(0);
 	await expect(page.locator('.scope-note')).toHaveCount(0);
 	await expect(page.locator('.repository-link')).toHaveAttribute('href', 'https://github.com/sjovang/landingzones-diff-reports-for-humans');
-	await expect(page.locator('.repository-name')).toHaveText('sjovang / landingzones-diff-reports-for-humans');
+	await expect(page.getByRole('link', { name: 'View source repository on GitHub (opens in a new tab)' })).toBeVisible();
+	await expect(page.locator('.repository-link svg')).toHaveCount(1);
+	await expect(page.locator('.repository-link')).toHaveText('');
 	await awaitCompareButton(page);
 	await expect(page.locator('.intro')).toHaveCSS('text-align', 'center');
 	const introSpacing = await page.evaluate(() => {

@@ -23,6 +23,7 @@
 		"build:functions": "tsc -p tsconfig.functions.json",
 		"functions:start": "npm run build:functions && func start",
 		"releases:sync": "npm run build:functions && node --env-file-if-exists=.env dist-functions/scripts/sync-releases.js",
+		"timelines:generate": "npm run build:functions && node --env-file-if-exists=.env dist-functions/scripts/generate-timelines.js",
 		"storage:start": "azurite --silent --location .azurite --skipApiVersionCheck",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

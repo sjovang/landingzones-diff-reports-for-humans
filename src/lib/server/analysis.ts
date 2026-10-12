@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { assignmentContextFacts, type ChangeKind, type PolicyAssignmentContext, type ReleaseChange } from '../types.js';
 import { AppError } from './errors.js';
+import { isTimelineKind } from '../timelines.js';
 
 type RecordValue = Record<string, unknown>;
 export type ReleaseFiles = Map<string, string>;
@@ -575,6 +576,20 @@ function entityFacts(before: Entity | undefined, after: Entity | undefined, sour
 function sourceLink(sha: string, path: string): string {
 	return `${UPSTREAM}/blob/${sha}/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
+export function describeTimelineEntities(files: ReleaseFiles, sha: string, dependency?: DependencyContext) {
+	const entities = effectiveInventory(files, sha, dependency).entities;
+	return [...entities.entries()].flatMap(([id, entity]) => isTimelineKind(entity.kind) ? [{
+		id, name: entity.name, kind: entity.kind,
+		title: displayName(entity),
+		description: text(properties(entity).description),
+		version: version(entity),
+		deprecated: record(properties(entity).metadata).deprecated === true,
+		fingerprint: stable(entity.value),
+		path: entity.path,
+		source: sourceLink(entity.sha, entity.path),
+		provenance: entity.path.startsWith('platform/slz/') ? 'slz' as const : 'alz' as const
+	}] : []);
+}
 function contextSummary(before: PolicyAssignmentContext[], after: PolicyAssignmentContext[], kind: ChangeKind): string {
 	const unchanged = `The ${kind} definition is unchanged.`;
 	const replaced = after.find((context) => before.some((old) => old.assignmentId === context.assignmentId && old.definitionId !== context.definitionId));
@@ -593,11 +608,12 @@ function contextSummary(before: PolicyAssignmentContext[], after: PolicyAssignme
 
 export function analyzeReleases(
 	beforeFiles: ReleaseFiles, afterFiles: ReleaseFiles, fromSha: string, toSha: string,
-	dependencies?: { before: DependencyContext; after: DependencyContext }
+	dependencies?: { before: DependencyContext; after: DependencyContext },
+	alignInheritedPolicies = true
 ): { changes: ReleaseChange[]; sourceFilesChanged: number } {
 	const before = effectiveInventory(beforeFiles, fromSha, dependencies?.before);
 	const after = effectiveInventory(afterFiles, toSha, dependencies?.after);
-	if (dependencies) {
+	if (dependencies && alignInheritedPolicies) {
 		for (const entity of [...before.entities.values(), ...after.entities.values()]) {
 			if (entity.kind !== 'policy' && entity.kind !== 'initiative') continue;
 			const id = `${entity.kind}:${entity.name}`;
