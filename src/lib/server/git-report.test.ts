@@ -103,6 +103,28 @@ describe('immutable ALZ snapshot reuse', () => {
 		expect(saveReleaseSnapshot).not.toHaveBeenCalled();
 	});
 
+	it('validates annotated tags against their peeled commit, not the tag object SHA', async () => {
+		vi.mocked(loadReleaseSnapshot).mockResolvedValue(null);
+		prepareGitSnapshot();
+		const tagSha = 'c'.repeat(40);
+		vi.mocked(git.fetch).mockResolvedValue({
+			defaultBranch: 'refs/heads/main', fetchHead: tagSha, fetchHeadDescription: before.tag
+		});
+		expect(await getReleaseSnapshot(before)).toEqual(new Map([['platform/alz/README.md', 'ALZ source']]));
+		expect(git.readCommit).toHaveBeenCalledWith(expect.objectContaining({ oid: tagSha }));
+		expect(saveReleaseSnapshot).toHaveBeenCalledWith(before.sha, expect.any(Map), 'alz');
+	});
+
+	it('rejects an annotated tag that peels to a different synchronized commit', async () => {
+		vi.mocked(loadReleaseSnapshot).mockResolvedValue(null);
+		prepareGitSnapshot('d'.repeat(40));
+		vi.mocked(git.fetch).mockResolvedValue({
+			defaultBranch: 'refs/heads/main', fetchHead: 'c'.repeat(40), fetchHeadDescription: before.tag
+		});
+		await expect(getReleaseSnapshot(before)).rejects.toThrow('does not match the synchronized commit');
+		expect(saveReleaseSnapshot).not.toHaveBeenCalled();
+	});
+
 	it('does not share snapshots between libraries at the same commit', async () => {
 		const slz = { ...before, tag: 'platform/slz/1.0.0' };
 		vi.mocked(loadReleaseSnapshot).mockImplementation(async (_sha, library) => new Map([

@@ -46,8 +46,10 @@ with an ALZ snapshot. The newest two releases of each library and their pinned
 dependencies are warmed during sync; older releases are fetched by immutable commit via Git and
 stored when first compared. Concurrent requests in one process share that
 fetch; independent worker instances may fetch the same missing snapshot
-concurrently, but conditional Blob creation prevents replacement. Comparison
-generation makes no GitHub REST calls. Moved or removed tags are reflected
+concurrently, but conditional Blob creation prevents replacement. Snapshot
+validation peels annotated tags and verifies the underlying commit against the
+catalog SHA, including legacy tags. Comparison generation makes no GitHub REST
+calls. Moved or removed tags are reflected
 after the next successful sync; a queued comparison fails explicitly if its
 selected tags or dependency commits no longer match the catalog. Compatible
 completed reports remain available by job ID.
@@ -72,6 +74,99 @@ unrelated ALZ changes and architectures are not imported. Evidence carries
 each entity's source commit. Source-file counts cover SLZ files only, whereas
 semantic totals also include relevant inherited changes. Unavailable built-in
 definitions remain explicitly unresolved.
+
+## Object timelines
+
+`/timelines` searches independently generated policy definitions, policy set
+definitions (`initiative` internally), and archetypes across ALZ and SLZ,
+including removed and never-modified objects. Library, kind, and search filters
+persist in query parameters. `/timelines/<library>/<kind>/<encoded-name>` is a
+deterministic identity-based URL that resolves to the latest published generation.
+Expanded comparison details link there with **Show timeline**; comparisons do
+not generate, fetch, or embed timeline reports.
+
+Generation is manual: run `npm run timelines:generate`, or POST to the Azure
+Function `/api/timelines/generate` using its function key. The HTTP Function
+returns 202 with a request ID and enqueues `timeline-jobs`; the dedicated
+`generateTimelineReports` worker calls the same generator as the npm script.
+Generation is not called by hourly release synchronization or comparison jobs.
+The dedicated-plan Functions host permits up to 30 minutes per invocation.
+Follow Function logs for completion or failures; queue retries follow the
+existing host settings and exhausted messages go to `timeline-jobs-poison`.
+
+The generator reads the catalog and cached snapshots, streaming releases in
+chronological order with only the preceding snapshot retained for comparison.
+It analyzes each adjacent pair once using the shared deterministic evaluator,
+then builds one report per observed object. Missing snapshots (including SLZ's pinned
+ALZ dependencies or dependency metadata) are published as explicit coverage gaps.
+Only available adjacent releases are compared; a gap resets the comparison baseline.
+Invalid JSON, storage read failures, and failed writes still abort publication.
+It makes no upstream requests or comparison-cache
+writes. SLZ history follows effective inclusion in each release without extending
+inherited policies into releases where they are no longer relevant; comparison
+evaluation retains its existing two-sided alignment rule.
+
+Each report contains every release from the newest back to first inclusion.
+The timeline page omits unchanged and absent release blocks to emphasize events; stored
+history, release counts, and the full release range remain intact. Introduction,
+first observations, removal, reintroduction, and coverage gaps remain visible.
+Known absence after removal does not add repeated blocks after the Removed event.
+The object header links to the source file at the newest release's immutable
+commit, even when that release is unchanged and hidden from the history.
+Removed objects and objects with unknown latest presence have no current-file link.
+Inherited SLZ objects use their pinned ALZ source commit.
+Header metadata lists lifecycle milestones instead of a release range: **First
+introduced** (or **First observed** when introduction is unproven), the earliest
+observed deprecation when applicable, and the most recent confirmed **Removed**
+release for objects absent in the latest release. Gaps do not establish milestones.
+Library, type, name, lifecycle milestones, latest-state notices, and the
+current-file source link use one accessible two-column metadata table.
+Release/change counts are not displayed in the detail header; stored report
+counts are unchanged. Overview rows omit change counts and show **First introduced**
+(or **First observed**, matching the detail table)
+with optional **Deprecated** and **Removed** dates, and **Last updated** for
+objects present in the latest release. Last updated is the newest confirmed
+addition, reintroduction, definition change, or usage change, not an unchanged
+release or a first-observed baseline. `latestRelease` is the last release
+covered by the report, including absence or gaps, not the last release containing
+the object; latest presence is displayed separately.
+Latest-state notices lead overview metadata. New generations include optional
+`firstReleaseStatus` in each summary to distinguish confirmed introduction from
+first observation; older publications conservatively display **First observed**
+until regenerated.
+New summaries also carry optional `deprecatedRelease`, `removedRelease`, and
+`lastUpdatedRelease`. Regenerate older publications to populate these dates;
+missing dates are omitted rather than guessed.
+Introduction is supported by absence in the preceding release. An object present
+in the catalog's earliest release is **first observed**, not proven created.
+After a gap, presence is also **first observed**, never an inferred introduction,
+reintroduction, or modification. Verified absence after a gap is not a removal.
+Consecutive missing releases remain separate gap entries, including gaps directly
+before first observation when introduction cannot be established. If the latest
+release is missing, `presentInLatest` is `null` (unknown), not false.
+The index lists all missing releases and reasons, including gaps before an object's
+history and libraries with no available snapshots. Objects found only in missing
+releases cannot be discovered. An entirely missing cache publishes an empty index
+with coverage gaps rather than claiming an empty library. Hydrate and regenerate
+to fill gaps. Each object summary includes `gapCount`.
+Removal and reintroduction remain separate events, and rename detection is not
+inferred. Definition changes are distinguished from assignment-only usage
+changes. SLZ provenance carries each object's actual source commit; leaving SLZ
+does not prove deletion from ALZ.
+
+Reports are private, immutable Blob JSON under
+`reports/timelines-v1/<generation-id>/<identity-hash>.json`. Bounded parallel
+writes finish before `reports/timelines-v1/index.json` is conditionally replaced
+using its previous ETag. Readers therefore see one complete generation, and a
+concurrent publisher cannot overwrite a newer index. Failed and superseded
+generation blobs have no automatic retention cleanup in this prototype.
+Read-only `/api/timelines` and `/api/timelines/<library>/<kind>/<name>` endpoints
+serve the publication; missing generation returns actionable 503 and unknown
+objects return 404. An incompatible index can be replaced by generation using
+its raw ETag. Timeline schema **2** adds gap entries, index coverage gaps, and
+nullable latest presence; the Blob namespace remains `timelines-v1`. Timeline
+schema versioning is separate from report schema 6 and
+does not invalidate existing comparisons.
 
 ## Change evaluation and display rules
 

@@ -247,13 +247,59 @@ Disabled release selectors remain visibly distinct.
 
 ### Navigation
 
-A white top bar pairs the Landing Zone Release Brief name and a cobalt two-release
-comparison mark with the app's GitHub
-repository link. Both links have (44px) minimum hit height. On phones, the
-repository name may ellipsize; the destination remains available. A skip link
+A shared white top bar pairs the Landing Zone Release Brief name and a cobalt
+two-release comparison mark with Compare releases and Timelines navigation,
+followed by an icon-only GitHub repository link. Comparison, timeline overview,
+and timeline detail pages all use `AppHeader.svelte`; the active section has a
+cobalt label and `aria-current="page"`. Links have (44px) minimum hit height,
+and the GitHub icon has an accessible destination label and new-tab notice.
+A decorative (1px) vertical divider separates the two navigation choices,
+with (12px) spacing on each side on desktop and mobile.
+On phones, the brand and GitHub icon occupy the first row, with navigation on
+the second row. A skip link
 appears on keyboard focus. The (28px) comparison mark also serves as the browser
 favicon. The name describes the human-readable report rather than a raw diff;
 it was selected autonomously when the user was unavailable for naming review.
+
+### Timeline coverage
+
+Missing cached releases use explicit **Coverage gap** entries with a dashed
+timeline connector and the existing deprecated/notice ink. Each gap explains
+the missing snapshot or pinned dependency; it never implies object absence.
+The overview has an expandable release-gap list and per-object gap counts.
+A missing newest release is labeled **Latest state unknown**, not removed.
+Unchanged and not-present releases are omitted from the visible history.
+A confirmed Removed event remains the final known event for a removed object;
+coverage gaps and reintroductions remain visible. The first observation
+or introduction remains visible even for objects that have never changed; full
+release counts and the range still reflect the stored history.
+The detail header uses a two-column metadata table below the description.
+Library, type, and name share this table with first introduction/observation,
+optional deprecation, confirmed removal, and any latest-state notice.
+A current-file GitHub link appears as a Source row only for objects present
+in the latest release. Row headers and consistent padding support scanning without row separators;
+long names wrap within the value column on mobile.
+The label column is capped at (140px), including (12px) right padding, keeping
+values close to their labels rather than reserving a percentage of table width.
+Cells use (4px) vertical padding for compact, consistent rows.
+HTTP/HTTPS URLs in detail descriptions render as underlined links with a
+new-tab notice. Long URLs wrap without overflowing; description text is never
+interpreted as HTML.
+Release/change totals are omitted from the detail header; they remain stored
+in the report. Overview rows omit change counts and show **First introduced**
+(or **First observed** for an unproven introduction, matching the detail table),
+optional **Deprecated** and **Removed** release dates, and **Last updated** for
+currently present objects with a recorded change. Unchanged releases do not
+advance Last updated; an unproven baseline is not presented as an update.
+Removal, unknown latest state, or deprecation notices lead the overview metadata,
+ahead of library, type, and release dates.
+Overview title and metadata columns align at the top, including multiline
+titles. Columns are separated by (24px); metadata uses its content width rather
+than reserving an extra action column. View timeline always sits below the
+title/description with a (12px) gap. On mobile, metadata follows that action.
+Overview subtitles show the object's description instead of its internal name;
+objects without a description omit the subtitle. Names remain searchable and
+visible in the detail metadata table.
 
 ### Status Badges
 

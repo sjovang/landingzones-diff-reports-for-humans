@@ -65,8 +65,10 @@ async function fetchReleaseSnapshot(sha: string, tag: string, library: Library):
 			tags: false
 		});
 		const fetchedSha = result.fetchHead?.toLowerCase();
-		if (fetchedSha !== sha) throw new AppError('The upstream release snapshot does not match the synchronized commit.', 502);
-		const { commit } = await git.readCommit({ fs, dir: directory, oid: fetchedSha });
+		if (!fetchedSha || !SHA_PATTERN.test(fetchedSha)) throw new AppError('The upstream release snapshot has an invalid commit reference.', 502);
+		// readCommit peels annotated tags before validating the immutable commit.
+		const { commit, oid } = await git.readCommit({ fs, dir: directory, oid: fetchedSha });
+		if (oid.toLowerCase() !== sha) throw new AppError('The upstream release snapshot does not match the synchronized commit.', 502);
 		const tree = await releaseTree(directory, commit.tree, library);
 		if (!tree.size) throw new AppError(`The synchronized commit contains no ${library.toUpperCase()} source files.`, 502);
 
