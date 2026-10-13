@@ -1,5 +1,20 @@
 import { expect, test } from '@playwright/test';
 
+test('includes anonymous statistics with performance and Do Not Track enabled', async ({ request }) => {
+	const response = await request.get('/');
+	expect(response.ok()).toBe(true);
+	const html = await response.text();
+	const scripts = html.match(/<script\b[^>]*src="https:\/\/stats\.liasis\.dev\/script\.js"[^>]*>/g);
+	expect(scripts).toHaveLength(1);
+	const script = scripts![0];
+	expect(script).toMatch(/\bdefer\b/);
+	expect(script).toContain('data-website-id="c5a1add3-10ce-49b1-998e-44ba203a3da1"');
+	expect(script).toContain('data-performance="true"');
+	expect(script).toContain('data-do-not-track="true"');
+	expect(script.match(/\bdata-website-id=/g)).toHaveLength(1);
+	expect(script).not.toContain('data-host-url');
+});
+
 const releases = [
 	{ tag: 'platform/alz/2026.10.0', version: '2026.10.0', url: 'https://github.com/Azure/Azure-Landing-Zones-Library/tree/platform/alz/2026.10.0' },
 	{ tag: 'platform/alz/2025.10.0', version: '2025.10.0', url: 'https://github.com/Azure/Azure-Landing-Zones-Library/tree/platform/alz/2025.10.0' }

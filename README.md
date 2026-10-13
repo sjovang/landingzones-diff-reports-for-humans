@@ -11,6 +11,10 @@ policy changes relevant to SLZ, with evidence linked to the correct immutable
 commits. Unrelated ALZ changes are excluded. The tool does not inspect Azure
 environments or certify upgrade safety.
 
+Production builds load anonymous usage and performance statistics from
+`https://stats.liasis.dev`, with Do Not Track support enabled. The statistics
+script is disabled during local development (`npm run dev`).
+
 Browse [object timelines](./docs/TECHNICAL_OVERVIEW.md#object-timelines) at
 `/timelines` to search policies, policy sets, and archetypes and follow their
 release history at a stable URL, with explicit gaps for missing cached releases.
