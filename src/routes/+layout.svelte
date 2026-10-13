@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { dev } from '$app/env';
 import favicon from '#lib/assets/favicon.svg';
 	import type { Snippet } from 'svelte';
 
@@ -6,6 +7,15 @@ import favicon from '#lib/assets/favicon.svg';
 </script>
 
 <svelte:head>
+	{#if !dev}
+		<script
+			defer
+			src="https://stats.liasis.dev/script.js"
+			data-website-id="c5a1add3-10ce-49b1-998e-44ba203a3da1"
+			data-performance="true"
+			data-do-not-track="true"
+		></script>
+	{/if}
 	<link rel="icon" href={favicon} />
 	<meta
 		name="description"
